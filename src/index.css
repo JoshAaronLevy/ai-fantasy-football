@@ -1,0 +1,137 @@
+/* App theme tweaks */
+:root {
+  --bff-bg: #f8fafc;
+  --bff-card: #ffffff;
+  --bff-ink: #1e293b;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: linear-gradient(180deg, #f8fafc, #f1f5f9 35%, #e2e8f0 100%);
+  color: var(--bff-ink);
+  font-feature-settings: "kern";
+}
+
+/* AG Grid theme sizing */
+.ag-theme-quartz {
+  --ag-foreground-color: #1e293b;
+  --ag-background-color: #ffffff;
+  --ag-header-background-color: #f8fafc;
+  --ag-header-foreground-color: #334155;
+  --ag-odd-row-background-color: #f8fafc;
+  --ag-row-hover-color: #f1f5f9;
+  --ag-borders: #e2e8f0;
+  --ag-font-size: 14px;
+  --ag-cell-horizontal-padding: 10px;
+}
+
+/* Custom utility classes to replace Tailwind */
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  flex-direction: column;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.gap-2 {
+  gap: 0.5rem;
+}
+
+.gap-3 {
+  gap: 0.75rem;
+}
+
+.space-y-4 > * + * {
+  margin-top: 1rem;
+}
+
+.min-h-screen {
+  min-height: 100vh;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.max-w-7xl {
+  max-width: 80rem;
+}
+
+.mx-auto {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.px-4 {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.py-6 {
+  padding-top: 1.5rem;
+  padding-bottom: 1.5rem;
+}
+
+.rounded-2xl {
+  border-radius: 1rem;
+}
+
+.overflow-hidden {
+  overflow: hidden;
+}
+
+/* PrimeReact component overrides for dark theme consistency */
+.p-component {
+  font-family: inherit;
+}
+
+.p-button {
+  font-family: inherit;
+}
+
+/* Custom header styling */
+.custom-header {
+  background: linear-gradient(to right, #3b82f6, #8b5cf6, #ec4899);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.1);
+}
+
+.custom-main {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 95vw;
+  padding: 1rem 1rem 1.5rem 1rem;
+}
+
+@media (min-width: 640px) {
+  .custom-main {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .custom-main {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
