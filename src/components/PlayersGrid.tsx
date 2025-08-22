@@ -8,10 +8,12 @@ import { Button } from 'primereact/button'
 import { InputText } from 'primereact/inputtext'
 import { Checkbox } from 'primereact/checkbox'
 import { Message } from 'primereact/message'
+import { Toast } from 'primereact/toast'
 
 import type { Player } from '../types'
 import { fetchPlayers } from '../lib/api'
 import { useDraftStore } from '../state/draftStore'
+import { DraftConfigModal } from './DraftConfigModal'
 import { Star, StarOff, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
 const StarCell: React.FC<ICellRendererParams<Player>> = (params) => {
@@ -48,17 +50,107 @@ const StarCell: React.FC<ICellRendererParams<Player>> = (params) => {
   )
 }
 
-const ActionButtonsCell: React.FC<ICellRendererParams<Player>> = (params) => {
-  const data = params.data
+const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.RefObject<Toast | null> }> = (params) => {
+  const { data, toast } = params
   const draftPlayer = useDraftStore((s) => s.draftPlayer)
   const takePlayer = useDraftStore((s) => s.takePlayer)
   const isDrafted = useDraftStore((s) => s.isDrafted)
   const isTaken = useDraftStore((s) => s.isTaken)
+  const canDraft = useDraftStore((s) => s.canDraft)
+  const canTake = useDraftStore((s) => s.canTake)
+  const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
+  const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
   if (!data) return null
 
   const drafted = isDrafted(data.id)
   const taken = isTaken(data.id)
   const unavailable = drafted || taken
+  
+  // If draft is not configured, use original behavior
+  if (!isDraftConfigured()) {
+    const handleDraftClick = () => {
+      if (!unavailable) {
+        draftPlayer(data.id);
+      }
+    }
+
+    const handleTakeClick = () => {
+      if (!unavailable) {
+        takePlayer(data.id);
+      }
+    }
+
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        height: '100%',
+        justifyContent: 'center'
+      }}>
+        <Button
+          label={drafted ? 'Drafted' : 'Draft'}
+          onClick={handleDraftClick}
+          disabled={unavailable}
+          className={unavailable ? 'p-button-secondary' : 'p-button-success'}
+          size="small"
+          style={{
+            fontSize: '0.75rem',
+            padding: '0.25rem 0.5rem'
+          }}
+          tooltip={unavailable ? 'Unavailable' : 'Add to my team'}
+          tooltipOptions={{ position: 'top' }}
+        />
+        <Button
+          label={taken ? 'Taken' : 'Take'}
+          onClick={handleTakeClick}
+          disabled={unavailable}
+          className={unavailable ? 'p-button-secondary' : 'p-button-danger'}
+          size="small"
+          style={{
+            fontSize: '0.75rem',
+            padding: '0.25rem 0.5rem'
+          }}
+          tooltip={unavailable ? 'Unavailable' : 'Mark as taken'}
+          tooltipOptions={{ position: 'top' }}
+        />
+      </div>
+    )
+  }
+
+  // Snake draft behavior when configured
+  const canDraftThisPlayer = canDraft() && !unavailable
+  const canTakeThisPlayer = canTake() && !unavailable
+
+  const handleDraftClick = () => {
+    if (canDraftThisPlayer) {
+      const currentPick = getCurrentPick();
+      draftPlayer(data.id);
+      
+      // Show success toast for my draft pick
+      toast.current?.show({
+        severity: 'success',
+        summary: `Pick ${currentPick}: ${data.position} - ${data.name} - ${data.team?.abbr || 'N/A'}`,
+        life: 3000,
+        className: 'center-toast'
+      });
+    }
+  }
+
+  const handleTakeClick = () => {
+    if (canTakeThisPlayer) {
+      const currentPick = getCurrentPick();
+      takePlayer(data.id);
+      
+      // Show danger toast for taken player
+      toast.current?.show({
+        severity: 'error',
+        summary: `Pick ${currentPick}: ${data.position} - ${data.name} - ${data.team?.abbr || 'N/A'}`,
+        life: 2000,
+        className: 'center-toast'
+      });
+    }
+  }
 
   return (
     <div style={{
@@ -70,28 +162,36 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player>> = (params) => {
     }}>
       <Button
         label={drafted ? 'Drafted' : 'Draft'}
-        onClick={() => draftPlayer(data.id)}
-        disabled={unavailable}
-        className={unavailable ? 'p-button-secondary' : 'p-button-success'}
+        onClick={handleDraftClick}
+        disabled={!canDraftThisPlayer}
+        className={!canDraftThisPlayer ? 'p-button-secondary' : 'p-button-success'}
         size="small"
         style={{
           fontSize: '0.75rem',
           padding: '0.25rem 0.5rem'
         }}
-        tooltip={unavailable ? 'Unavailable' : 'Add to my team'}
+        tooltip={
+          unavailable ? 'Unavailable' :
+          !canDraft() ? 'Not your turn' :
+          'Add to my team'
+        }
         tooltipOptions={{ position: 'top' }}
       />
       <Button
-        label={taken ? 'Taken' : 'Taken'}
-        onClick={() => takePlayer(data.id)}
-        disabled={unavailable}
-        className={unavailable ? 'p-button-secondary' : 'p-button-danger'}
+        label={taken ? 'Taken' : 'Take'}
+        onClick={handleTakeClick}
+        disabled={!canTakeThisPlayer}
+        className={!canTakeThisPlayer ? 'p-button-secondary' : 'p-button-danger'}
         size="small"
         style={{
           fontSize: '0.75rem',
           padding: '0.25rem 0.5rem'
         }}
-        tooltip={unavailable ? 'Unavailable' : 'Mark as taken'}
+        tooltip={
+          unavailable ? 'Unavailable' :
+          !canTake() ? 'Your turn to draft' :
+          'Mark as taken'
+        }
         tooltipOptions={{ position: 'top' }}
       />
     </div>
@@ -219,18 +319,149 @@ export const PlayersGrid: React.FC = () => {
   const isStarred = useDraftStore((s) => s.isStarred)
   const undoDraft = useDraftStore((s) => s.undoDraft)
   const resetDraft = useDraftStore((s) => s.resetDraft)
+  const currentRound = useDraftStore((s) => s.currentRound)
+  const actionHistory = useDraftStore((s) => s.actionHistory)
+  const drafted = useDraftStore((s) => s.drafted)
+  const taken = useDraftStore((s) => s.taken)
+  const isMyTurn = useDraftStore((s) => s.isMyTurn)
+  const getPicksUntilMyTurn = useDraftStore((s) => s.getPicksUntilMyTurn)
 
   const [quickFilter, setQuickFilter] = React.useState('')
   const [showStarredOnly, setShowStarredOnly] = React.useState(false)
+  const [animateRound, setAnimateRound] = React.useState(false)
+  const [prevRound, setPrevRound] = React.useState(currentRound)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [gridApi, setGridApi] = React.useState<any>(null)
+  const [showConfigModal, setShowConfigModal] = React.useState(false)
+  const [prevIsMyTurn, setPrevIsMyTurn] = React.useState(false)
+  const [prevPicksUntilTurn, setPrevPicksUntilTurn] = React.useState(0)
+  const [hidingPlayerIds, setHidingPlayerIds] = React.useState<Set<string>>(new Set())
+
+  const toast = React.useRef<Toast>(null)
+  const draftConfig = useDraftStore((s) => s.draftConfig)
+  const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
+  const hideDraftedPlayers = useDraftStore((s) => s.hideDraftedPlayers)
+  const toggleHideDraftedPlayers = useDraftStore((s) => s.toggleHideDraftedPlayers)
+
+  // Handle round change animation
+  React.useEffect(() => {
+    if (currentRound !== prevRound) {
+      setAnimateRound(true)
+      setPrevRound(currentRound)
+      const timer = setTimeout(() => setAnimateRound(false), 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [currentRound, prevRound])
+
+  // Monitor turn changes for toast notifications
+  React.useEffect(() => {
+    if (!isDraftConfigured()) return
+
+    const currentIsMyTurn = isMyTurn()
+    const currentPicksUntilTurn = getPicksUntilMyTurn()
+
+    // Show "You're up next" toast when exactly 1 pick until my turn
+    if (currentPicksUntilTurn === 1 && prevPicksUntilTurn !== 1) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: "You're up next!",
+        life: 0, // Keep until dismissed
+        className: 'top-right-toast'
+      })
+    }
+
+    // Show "It's your turn" toast when it becomes my turn
+    if (currentIsMyTurn && !prevIsMyTurn) {
+      // Clear any existing "up next" toast
+      toast.current?.clear()
+      
+      toast.current?.show({
+        severity: 'success',
+        summary: "It's your turn!",
+        life: 0, // Keep until I draft
+        className: 'top-right-toast'
+      })
+    }
+
+    // Clear turn toasts when I've drafted (no longer my turn after drafting)
+    if (!currentIsMyTurn && prevIsMyTurn) {
+      toast.current?.clear()
+    }
+
+    setPrevIsMyTurn(currentIsMyTurn)
+    setPrevPicksUntilTurn(currentPicksUntilTurn)
+  }, [isMyTurn(), getPicksUntilMyTurn(), prevIsMyTurn, prevPicksUntilTurn, isDraftConfigured])
+
+  // Force AG Grid to refresh when state changes
+  React.useEffect(() => {
+    if (gridApi) {
+      gridApi.refreshCells();
+    }
+  }, [gridApi, actionHistory, drafted, taken])
+
+  // Handle smooth hiding of drafted players
+  React.useEffect(() => {
+    if (hideDraftedPlayers) {
+      // When hiding is enabled, immediately start hiding any drafted/taken players
+      const draftedTakenIds = data?.filter(p => isDrafted(p.id) || isTaken(p.id)).map(p => p.id) || []
+      if (draftedTakenIds.length > 0) {
+        setHidingPlayerIds(new Set(draftedTakenIds))
+      }
+    } else {
+      // When hiding is disabled, clear the hiding set
+      setHidingPlayerIds(new Set())
+    }
+  }, [hideDraftedPlayers, data, isDrafted, isTaken])
+
+  // Handle smooth removal with delay when new players are drafted/taken
+  React.useEffect(() => {
+    if (!hideDraftedPlayers) return
+
+    const lastAction = actionHistory[actionHistory.length - 1]
+    if (lastAction) {
+      const playerId = lastAction.id
+      if (!hidingPlayerIds.has(playerId)) {
+        // Add a 2-second delay before hiding the player
+        const timer = setTimeout(() => {
+          setHidingPlayerIds(prev => new Set([...prev, playerId]))
+        }, 2000)
+        return () => clearTimeout(timer)
+      }
+    }
+  }, [actionHistory, hideDraftedPlayers, hidingPlayerIds])
+
+  // Handle undo functionality - remove players from hiding set when undone
+  const prevActionHistoryLength = React.useRef(actionHistory.length)
+  React.useEffect(() => {
+    if (actionHistory.length < prevActionHistoryLength.current) {
+      // An undo occurred, check which player was undone
+      const currentPlayerIds = new Set(actionHistory.map(action => action.id))
+      setHidingPlayerIds(prev => {
+        const newSet = new Set(prev)
+        for (const playerId of prev) {
+          if (!currentPlayerIds.has(playerId)) {
+            newSet.delete(playerId)
+          }
+        }
+        return newSet
+      })
+    }
+    prevActionHistoryLength.current = actionHistory.length
+  }, [actionHistory])
 
   const filteredData = React.useMemo(() => {
     if (!data) return []
     return data.filter((p) => {
-      if (isDrafted(p.id) || isTaken(p.id)) return false // hide drafted and taken
+      // If hideDraftedPlayers is enabled, filter out players that are being hidden
+      if (hideDraftedPlayers && hidingPlayerIds.has(p.id)) return false
+      
+      // If hideDraftedPlayers is disabled, show all players (including drafted/taken)
+      // This allows drafted/taken players to remain visible with disabled buttons
+      
       if (showStarredOnly && !isStarred(p.id)) return false
       return true
     })
-  }, [data, isDrafted, isTaken, isStarred, showStarredOnly])
+  }, [data, isStarred, showStarredOnly, hideDraftedPlayers, hidingPlayerIds])
 
   const colDefs = React.useMemo<ColDef<Player>[]>(() => [
     { headerName: '★', width: 70, cellRenderer: StarCell, suppressHeaderMenuButton: true, sortable: false, filter: false },
@@ -244,10 +475,18 @@ export const PlayersGrid: React.FC = () => {
     { headerName: 'Exp Rd', field: 'expectedRound', width: 100, filter: 'agNumberColumnFilter' },
     { headerName: 'Bye', field: 'byeWeek', width: 90, filter: 'agNumberColumnFilter' },
     { headerName: 'Yrs', field: 'yearsPro', width: 90, filter: 'agNumberColumnFilter' },
-    { headerName: 'Role', field: 'role', flex: 1, minWidth: 140, filter: true },
+    { headerName: 'Role', field: 'role', width: 140, filter: true },
     { headerName: 'Comp', field: 'competitionLevel', width: 120, filter: true },
-    { headerName: 'Actions', width: 150, cellRenderer: ActionButtonsCell, sortable: false, filter: false, suppressHeaderMenuButton: true },
-  ], [])
+    {
+      headerName: 'Actions',
+      width: 160,
+      cellRenderer: (params: ICellRendererParams<Player>) => <ActionButtonsCell {...params} toast={toast} />,
+      sortable: false,
+      filter: false,
+      suppressHeaderMenuButton: true,
+      pinned: 'right'
+    },
+  ], [toast])
 
   return (
     <section className="space-y-4">
@@ -296,14 +535,91 @@ export const PlayersGrid: React.FC = () => {
         justifyContent: 'space-between',
         gap: '0.5rem'
       }}>
-        <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
-          {isLoading ? 'Loading players…' : isError ? (
-            <Message
-              severity="error"
-              text={`Error: ${(error as Error)?.message}`}
-              style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem'
+        }}>
+          {/* Round Indicator */}
+          <div
+            className={animateRound ? 'round-indicator-animate' : 'round-indicator'}
+            style={{
+              backgroundColor: '#f1f5f9',
+              borderColor: '#cbd5e1',
+              border: '1px solid',
+              borderRadius: '0.375rem',
+              padding: '0.5rem 1rem',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              color: '#475569',
+              position: 'relative',
+              overflow: 'hidden',
+              minWidth: '80px',
+              textAlign: 'center'
+            }}
+          >
+            <span
+              key={currentRound}
+              className={animateRound ? 'round-number-animate' : 'round-number'}
+              style={{
+                display: 'inline-block'
+              }}
+            >
+              Round {currentRound}
+            </span>
+          </div>
+
+          {/* Draft Configuration Display */}
+          {isDraftConfigured() ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem'
+            }}>
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '0.375rem',
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.875rem',
+                color: '#475569'
+              }}>
+                {draftConfig.teams} Teams, Pick {draftConfig.pick}
+              </div>
+              <Button
+                label="Update Setup"
+                onClick={() => setShowConfigModal(true)}
+                className="p-button-outlined p-button-sm"
+                size="small"
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.25rem 0.5rem'
+                }}
+              />
+            </div>
+          ) : (
+            <Button
+              label="Configure Draft"
+              onClick={() => setShowConfigModal(true)}
+              className="p-button-success p-button-sm"
+              size="small"
+              style={{
+                fontSize: '0.875rem',
+                padding: '0.5rem 1rem'
+              }}
             />
-          ) : `${filteredData.length} players`}
+          )}
+          
+          {/* Status/Error display */}
+          <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+            {isLoading ? 'Loading players…' : isError ? (
+              <Message
+                severity="error"
+                text={`Error: ${(error as Error)?.message}`}
+                style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+              />
+            ) : `${filteredData.length} available`}
+          </div>
         </div>
         <div style={{
           display: 'flex',
@@ -327,16 +643,34 @@ export const PlayersGrid: React.FC = () => {
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem',
+            gap: '1rem',
             fontSize: '0.875rem',
             color: '#374151'
           }}>
-            <Checkbox
-              inputId="starred-only"
-              checked={showStarredOnly}
-              onChange={(e) => setShowStarredOnly(e.checked || false)}
-            />
-            <label htmlFor="starred-only">Show starred only</label>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <Checkbox
+                inputId="starred-only"
+                checked={showStarredOnly}
+                onChange={(e) => setShowStarredOnly(e.checked || false)}
+              />
+              <label htmlFor="starred-only">Show starred only</label>
+            </div>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <Checkbox
+                inputId="hide-drafted"
+                checked={hideDraftedPlayers}
+                onChange={() => toggleHideDraftedPlayers()}
+              />
+              <label htmlFor="hide-drafted">Hide drafted players</label>
+            </div>
           </div>
         </div>
       </div>
@@ -364,8 +698,18 @@ export const PlayersGrid: React.FC = () => {
           paginationPageSizeSelector={[20, 25, 50, 100]}
           theme="legacy"
           animateRows
+          onGridReady={(params) => {
+            setGridApi(params.api);
+          }}
         />
       </div>
+
+      <DraftConfigModal
+        visible={showConfigModal}
+        onHide={() => setShowConfigModal(false)}
+      />
+
+      <Toast ref={toast} />
     </section>
   )
 }
