@@ -60,6 +60,18 @@ body {
   gap: 0.75rem;
 }
 
+.gap-4 {
+  gap: 1rem;
+}
+
+.space-y-2 > * + * {
+  margin-top: 0.5rem;
+}
+
+.space-y-3 > * + * {
+  margin-top: 0.75rem;
+}
+
 .space-y-4 > * + * {
   margin-top: 1rem;
 }
@@ -70,6 +82,18 @@ body {
 
 .w-full {
   width: 100%;
+}
+
+.h-full {
+  height: 100%;
+}
+
+.flex-1 {
+  flex: 1 1 0%;
+}
+
+.flex-wrap {
+  flex-wrap: wrap;
 }
 
 .max-w-7xl {
@@ -91,12 +115,109 @@ body {
   padding-bottom: 1.5rem;
 }
 
+.py-8 {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+.p-4 {
+  padding: 1rem;
+}
+
+.mb-1 {
+  margin-bottom: 0.25rem;
+}
+
+.mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.mb-4 {
+  margin-bottom: 1rem;
+}
+
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
+.mt-4 {
+  margin-top: 1rem;
+}
+
 .rounded-2xl {
   border-radius: 1rem;
 }
 
 .overflow-hidden {
   overflow: hidden;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.text-lg {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.text-xl {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.text-4xl {
+  font-size: 2.25rem;
+  line-height: 2.5rem;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.block {
+  display: block;
+}
+
+.text-gray-500 {
+  color: #6b7280;
+}
+
+.text-gray-600 {
+  color: #4b5563;
+}
+
+.text-gray-700 {
+  color: #374151;
+}
+
+.text-gray-800 {
+  color: #1f2937;
+}
+
+.text-blue-700 {
+  color: #1d4ed8;
+}
+
+.text-green-700 {
+  color: #047857;
+}
+
+.bg-blue-50 {
+  background-color: #eff6ff;
+}
+
+.bg-green-50 {
+  background-color: #f0fdf4;
+}
+
+.rounded-lg {
+  border-radius: 0.5rem;
 }
 
 /* PrimeReact component overrides for dark theme consistency */
@@ -218,4 +339,83 @@ body {
 .p-checkbox .p-checkbox-box {
   background: none !important;
   border: 1px solid #424b57 !important;
+}
+
+/* AI Analysis Drawer Styles */
+.ai-analysis-sidebar .p-sidebar {
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15) !important;
+  z-index: 1000 !important;
+  border-left: 3px solid #3b82f6 !important;
+  background: white !important;
+}
+
+.ai-analysis-sidebar .p-sidebar-content {
+  padding: 0 !important;
+  background: white !important;
+}
+
+.ai-analysis-sidebar .p-sidebar-header {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6) !important;
+  color: white !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+  padding: 1rem 1.5rem !important;
+}
+
+.ai-analysis-sidebar .p-sidebar-header .p-sidebar-header-content {
+  padding: 0 !important;
+}
+
+.ai-analysis-sidebar .p-sidebar-close-button {
+  color: white !important;
+}
+
+.ai-analysis-sidebar .p-sidebar-close-button:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Ensure all card content has light theme */
+.ai-analysis-sidebar .p-card {
+  background: white !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+.ai-analysis-sidebar .p-card .p-card-content {
+  background: white !important;
+  color: #1e293b !important;
+}
+
+.ai-analysis-sidebar .p-card .p-card-header {
+  background: white !important;
+  color: #1e293b !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.ai-analysis-sidebar .p-card .p-card-title {
+  color: #1e293b !important;
+}
+
+/* Button hover effects */
+.hover-bg-white-20:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.transition-colors {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Ensure drawer content scrolls properly */
+.ai-analysis-sidebar .p-sidebar-content {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+.ai-analysis-sidebar .p-sidebar-content > div {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  padding: 1.5rem !important;
+  background: white !important;
 }

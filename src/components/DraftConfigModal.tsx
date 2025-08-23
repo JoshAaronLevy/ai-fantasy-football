@@ -2,18 +2,23 @@ import React from 'react'
 import { Dialog } from 'primereact/dialog'
 import { Dropdown } from 'primereact/dropdown'
 import { Button } from 'primereact/button'
+import { Message } from 'primereact/message'
 import { useDraftStore } from '../state/draftStore'
+import { initializeDraft } from '../lib/api'
 
 interface DraftConfigModalProps {
   visible: boolean;
   onHide: () => void;
+  onDraftInitialized?: () => void;
 }
 
-export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onHide }) => {
-  const { draftConfig, setDraftConfig } = useDraftStore()
+export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onHide, onDraftInitialized }) => {
+  const { draftConfig, players, initializeDraftState } = useDraftStore()
   
   const [selectedTeams, setSelectedTeams] = React.useState<number | null>(draftConfig.teams)
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
+  const [isLoading, setIsLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
 
   // Reset form when modal opens with current config
   React.useEffect(() => {
@@ -45,19 +50,50 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     }))
   }, [selectedTeams])
 
-  const isFormValid = selectedTeams !== null && selectedPick !== null
+  const isFormValid = selectedTeams !== null && selectedPick !== null && !isLoading
 
-  const handleLetsDraft = () => {
-    if (isFormValid) {
-      setDraftConfig({ teams: selectedTeams, pick: selectedPick })
+  const handleLetsDraft = async () => {
+    if (!isFormValid || !selectedTeams || !selectedPick) return
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await initializeDraft({
+        numTeams: selectedTeams,
+        userPickPosition: selectedPick,
+        players: players
+      })
+
+      // Store the response data in the draft store
+      initializeDraftState(
+        response.conversationId,
+        response.strategy,
+        { teams: selectedTeams, pick: selectedPick }
+      )
+
+      // Close modal and trigger AI Analysis drawer
       onHide()
+      onDraftInitialized?.()
+    } catch (err) {
+      console.error('Failed to initialize draft:', err)
+      setError(err instanceof Error ? err.message : 'Failed to initialize draft')
+    } finally {
+      setIsLoading(false)
     }
   }
 
   const handleDismiss = () => {
-    setDraftConfig({ teams: null, pick: null })
+    setError(null)
     onHide()
   }
+
+  // Reset error when modal opens
+  React.useEffect(() => {
+    if (visible) {
+      setError(null)
+    }
+  }, [visible])
 
   return (
     <Dialog
@@ -71,6 +107,14 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       contentStyle={{ padding: '2rem' }}
     >
       <div className="space-y-6">
+        {error && (
+          <Message
+            severity="error"
+            text={error}
+            className="w-full"
+          />
+        )}
+        
         <div>
           <label 
             htmlFor="teams-dropdown" 
@@ -116,9 +160,10 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
             style={{ minWidth: '100px' }}
           />
           <Button
-            label="Let's Draft!"
+            label={isLoading ? "Initializing..." : "Let's Draft!"}
             onClick={handleLetsDraft}
             disabled={!isFormValid}
+            loading={isLoading}
             className="p-button-success"
             style={{ minWidth: '120px' }}
           />

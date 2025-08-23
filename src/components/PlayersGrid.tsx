@@ -1,5 +1,4 @@
 import React from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { AgGridReact } from 'ag-grid-react'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import 'ag-grid-community/styles/ag-grid.css'
@@ -11,7 +10,6 @@ import { Message } from 'primereact/message'
 import { Toast } from 'primereact/toast'
 
 import type { Player } from '../types'
-import { fetchPlayers } from '../lib/api'
 import { useDraftStore } from '../state/draftStore'
 import { DraftConfigModal } from './DraftConfigModal'
 import { Star, StarOff, TrendingUp, TrendingDown, Minus } from 'lucide-react'
@@ -313,7 +311,13 @@ const TeamLogoCell: React.FC<ICellRendererParams<Player>> = (params) => {
 }
 
 export const PlayersGrid: React.FC = () => {
-  const { data, isLoading, isError, error } = useQuery({ queryKey: ['players'], queryFn: fetchPlayers })
+  // Read players data from store instead of React Query
+  const data = useDraftStore((s) => s.players)
+  const isLoading = useDraftStore((s) => s.playersLoading)
+  const isError = useDraftStore((s) => s.playersError !== null)
+  const error = useDraftStore((s) => s.playersError)
+  
+  // Draft store selectors
   const isDrafted = useDraftStore((s) => s.isDrafted)
   const isTaken = useDraftStore((s) => s.isTaken)
   const isStarred = useDraftStore((s) => s.isStarred)
@@ -615,7 +619,7 @@ export const PlayersGrid: React.FC = () => {
             {isLoading ? 'Loading players…' : isError ? (
               <Message
                 severity="error"
-                text={`Error: ${(error as Error)?.message}`}
+                text={`Error: ${error || 'Unknown error'}`}
                 style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
               />
             ) : `${filteredData.length} available`}

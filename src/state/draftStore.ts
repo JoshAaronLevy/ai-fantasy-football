@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import type { Player } from '../types'
 
 type DraftAction = {
   id: string;
@@ -13,6 +14,12 @@ type DraftConfiguration = {
 }
 
 type DraftState = {
+  // Player data
+  players: Player[];
+  playersLoading: boolean;
+  playersError: string | null;
+  
+  // Draft state
   drafted: Record<string, true>;
   starred: Record<string, true>;
   myTeam: Record<string, true>;
@@ -22,6 +29,17 @@ type DraftState = {
   draftConfig: DraftConfiguration;
   hideDraftedPlayers: boolean;
 
+  // AI integration state
+  conversationId: string | null;
+  strategy: string | null;
+  draftInitialized: boolean;
+
+  // Player data actions
+  setPlayers: (players: Player[]) => void;
+  setPlayersLoading: (loading: boolean) => void;
+  setPlayersError: (error: string | null) => void;
+
+  // Draft actions
   draftPlayer: (id: string) => void;
   takePlayer: (id: string) => void;
   undoDraft: () => void;
@@ -30,6 +48,12 @@ type DraftState = {
   setDraftConfig: (config: DraftConfiguration) => void;
   isDraftConfigured: () => boolean;
   toggleHideDraftedPlayers: () => void;
+
+  // AI integration actions
+  setConversationId: (conversationId: string) => void;
+  setStrategy: (strategy: string) => void;
+  setDraftInitialized: (initialized: boolean) => void;
+  initializeDraftState: (conversationId: string, strategy: string, config: DraftConfiguration) => void;
 
   isDrafted: (id: string) => boolean;
   isStarred: (id: string) => boolean;
@@ -50,6 +74,12 @@ type DraftState = {
 export const useDraftStore = create<DraftState>()(
   persist(
     (set, get) => ({
+      // Player data state
+      players: [],
+      playersLoading: false,
+      playersError: null,
+      
+      // Draft state
       drafted: {},
       starred: {},
       myTeam: {},
@@ -58,6 +88,16 @@ export const useDraftStore = create<DraftState>()(
       currentRound: 1,
       draftConfig: { teams: null, pick: null },
       hideDraftedPlayers: false,
+
+      // AI integration state
+      conversationId: null,
+      strategy: null,
+      draftInitialized: false,
+
+      // Player data actions
+      setPlayers: (players) => set({ players, playersError: null }),
+      setPlayersLoading: (playersLoading) => set({ playersLoading }),
+      setPlayersError: (playersError) => set({ playersError, playersLoading: false }),
 
       draftPlayer: (id) =>
         set((s) => {
@@ -138,7 +178,12 @@ export const useDraftStore = create<DraftState>()(
         actionHistory: [],
         currentRound: 1,
         draftConfig: { teams: null, pick: null },
-        hideDraftedPlayers: false
+        hideDraftedPlayers: false,
+        conversationId: null,
+        strategy: null,
+        draftInitialized: false
+        // Note: We keep players, playersLoading, and playersError as they represent
+        // the master player list, not draft-specific state
       }),
 
       toggleStar: (id) =>
@@ -160,6 +205,17 @@ export const useDraftStore = create<DraftState>()(
       },
 
       toggleHideDraftedPlayers: () => set((s) => ({ hideDraftedPlayers: !s.hideDraftedPlayers })),
+
+      // AI integration actions
+      setConversationId: (conversationId) => set({ conversationId }),
+      setStrategy: (strategy) => set({ strategy }),
+      setDraftInitialized: (draftInitialized) => set({ draftInitialized }),
+      initializeDraftState: (conversationId, strategy, config) => set({
+        conversationId,
+        strategy,
+        draftConfig: config,
+        draftInitialized: true
+      }),
 
       isDrafted: (id) => !!get().drafted[id],
       isStarred: (id) => !!get().starred[id],

@@ -1,7 +1,12 @@
 import React from 'react'
 import { Toolbar } from 'primereact/toolbar'
+import { Button } from 'primereact/button'
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  onViewAIAnalysis?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
   const startContent = (
     <div className="flex items-center gap-3">
       <div style={{
@@ -26,6 +31,27 @@ export const Header: React.FC = () => {
     </div>
   )
 
+  const endContent = (
+    <div className="flex items-center">
+      <Button
+        label="View AI Analysis"
+        icon="pi pi-chart-line"
+        onClick={onViewAIAnalysis}
+        size="large"
+        style={{
+          backgroundColor: 'rgba(255, 255, 255, 0.15)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          color: 'white',
+          fontWeight: '600',
+          padding: '0.75rem 1.5rem',
+          fontSize: '1rem'
+        }}
+        className="hover-bg-white-20 transition-colors"
+      />
+    </div>
+  )
+
   return (
     <header className="custom-header">
       <div style={{
@@ -35,6 +61,7 @@ export const Header: React.FC = () => {
       }}>
         <Toolbar
           start={startContent}
+          end={endContent}
           style={{
             background: 'transparent',
             border: 'none',
