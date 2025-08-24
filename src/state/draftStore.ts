@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { Player } from '../types'
+import type { Player, ConversationMessage, StreamingState } from '../types'
 
 type DraftAction = {
   id: string;
@@ -33,6 +33,21 @@ type DraftState = {
   conversationId: string | null;
   strategy: string | null;
   draftInitialized: boolean;
+  conversationMessages: ConversationMessage[];
+  isApiLoading: boolean;
+  
+  // Streaming state
+  streamingState: StreamingState;
+
+  // Offline mode state
+  isOfflineMode: boolean;
+  showOfflineBanner: boolean;
+  pendingApiCalls: Array<{
+    id: string;
+    type: 'initializeDraft' | 'playerTaken' | 'userTurn';
+    payload: Record<string, unknown>;
+    timestamp: number;
+  }>;
 
   // Player data actions
   setPlayers: (players: Player[]) => void;
@@ -54,6 +69,26 @@ type DraftState = {
   setStrategy: (strategy: string) => void;
   setDraftInitialized: (initialized: boolean) => void;
   initializeDraftState: (conversationId: string, strategy: string, config: DraftConfiguration) => void;
+  addConversationMessage: (message: ConversationMessage) => void;
+  setApiLoading: (loading: boolean) => void;
+  markPlayerTaken: (playerId: string, player: Player, confirmation: string, newConversationId?: string) => void;
+  markUserTurn: (playerId: string, player: Player, analysis: string, round: number, pick: number, newConversationId?: string) => void;
+  
+  // Streaming actions
+  startStreaming: (messageId: string, transportMode: 'fetch' | 'sse') => void;
+  updateStreamingMessage: (messageId: string, content: string) => void;
+  completeStreaming: (messageId: string, finalContent?: string) => void;
+  errorStreaming: (messageId: string, error: string) => void;
+  stopStreaming: () => void;
+  createStreamingMessage: (type: ConversationMessage['type'], player?: Player, round?: number, pick?: number) => string;
+
+  // Offline mode actions
+  setOfflineMode: (isOffline: boolean) => void;
+  setShowOfflineBanner: (show: boolean) => void;
+  dismissOfflineBanner: () => void;
+  addPendingApiCall: (type: 'initializeDraft' | 'playerTaken' | 'userTurn', payload: Record<string, unknown>) => void;
+  clearPendingApiCalls: () => void;
+  initializeDraftOffline: (config: DraftConfiguration) => void;
 
   isDrafted: (id: string) => boolean;
   isStarred: (id: string) => boolean;
@@ -93,6 +128,23 @@ export const useDraftStore = create<DraftState>()(
       conversationId: null,
       strategy: null,
       draftInitialized: false,
+      conversationMessages: [],
+      isApiLoading: false,
+      
+      // Streaming state
+      streamingState: {
+        isActive: false,
+        currentMessageId: undefined,
+        transportMode: undefined,
+        error: undefined,
+        startTime: undefined,
+        tokenCount: 0
+      },
+
+      // Offline mode state
+      isOfflineMode: false,
+      showOfflineBanner: false,
+      pendingApiCalls: [],
 
       // Player data actions
       setPlayers: (players) => set({ players, playersError: null }),
@@ -181,7 +233,21 @@ export const useDraftStore = create<DraftState>()(
         hideDraftedPlayers: false,
         conversationId: null,
         strategy: null,
-        draftInitialized: false
+        draftInitialized: false,
+        conversationMessages: [],
+        isApiLoading: false,
+        streamingState: {
+          isActive: false,
+          currentMessageId: undefined,
+          transportMode: undefined,
+          error: undefined,
+          startTime: undefined,
+          tokenCount: 0
+        },
+        // Reset offline mode state so fresh draft attempts use online mode first
+        isOfflineMode: false,
+        showOfflineBanner: false,
+        pendingApiCalls: []
         // Note: We keep players, playersLoading, and playersError as they represent
         // the master player list, not draft-specific state
       }),
@@ -214,7 +280,83 @@ export const useDraftStore = create<DraftState>()(
         conversationId,
         strategy,
         draftConfig: config,
-        draftInitialized: true
+        draftInitialized: true,
+        conversationMessages: [{
+          id: 'initial-strategy',
+          type: 'strategy',
+          content: strategy,
+          timestamp: Date.now()
+        }]
+      }),
+      
+      addConversationMessage: (message) => set((s) => ({
+        conversationMessages: [...s.conversationMessages, message]
+      })),
+      
+      setApiLoading: (isApiLoading) => set({ isApiLoading }),
+      
+      markPlayerTaken: (playerId, player, confirmation, newConversationId) => set((s) => {
+        // First mark the player as taken in the normal way
+        if (s.drafted[playerId] || s.taken[playerId]) {
+          return s; // already drafted or taken
+        }
+        
+        const newActionHistory = [...s.actionHistory, { id: playerId, type: 'taken' as const, timestamp: Date.now() }];
+        const newTotalDrafted = newActionHistory.length;
+        const teams = s.draftConfig.teams || 6;
+        const newRound = Math.floor((newTotalDrafted - 1) / teams) + 1;
+        
+        // Add conversation message
+        const newMessage: ConversationMessage = {
+          id: `player-taken-${playerId}-${Date.now()}`,
+          type: 'player-taken',
+          content: confirmation,
+          timestamp: Date.now(),
+          player: player
+        };
+        
+        return {
+          ...s,
+          taken: { ...s.taken, [playerId]: true as const },
+          actionHistory: newActionHistory,
+          currentRound: newRound,
+          conversationMessages: [...s.conversationMessages, newMessage],
+          conversationId: newConversationId || s.conversationId,
+          isApiLoading: false
+        };
+      }),
+
+      markUserTurn: (playerId, player, analysis, round, pick, newConversationId) => set((s) => {
+        // First mark the player as taken in the normal way
+        if (s.drafted[playerId] || s.taken[playerId]) {
+          return s; // already drafted or taken
+        }
+        
+        const newActionHistory = [...s.actionHistory, { id: playerId, type: 'taken' as const, timestamp: Date.now() }];
+        const newTotalDrafted = newActionHistory.length;
+        const teams = s.draftConfig.teams || 6;
+        const newRound = Math.floor((newTotalDrafted - 1) / teams) + 1;
+        
+        // Add conversation message for user turn analysis
+        const newMessage: ConversationMessage = {
+          id: `user-turn-${playerId}-${Date.now()}`,
+          type: 'user-turn',
+          content: analysis,
+          timestamp: Date.now(),
+          player: player,
+          round: round,
+          pick: pick
+        };
+        
+        return {
+          ...s,
+          taken: { ...s.taken, [playerId]: true as const },
+          actionHistory: newActionHistory,
+          currentRound: newRound,
+          conversationMessages: [...s.conversationMessages, newMessage],
+          conversationId: newConversationId || s.conversationId,
+          isApiLoading: false
+        };
       }),
 
       isDrafted: (id) => !!get().drafted[id],
@@ -330,6 +472,149 @@ export const useDraftStore = create<DraftState>()(
         
         return null;
       },
+      
+      // Streaming actions
+      startStreaming: (messageId, transportMode) => set(() => ({
+        streamingState: {
+          isActive: true,
+          currentMessageId: messageId,
+          transportMode,
+          error: undefined,
+          startTime: Date.now(),
+          tokenCount: 0
+        }
+      })),
+      
+      updateStreamingMessage: (messageId, content) => set((s) => {
+        const messageIndex = s.conversationMessages.findIndex(m => m.id === messageId);
+        if (messageIndex === -1) return s;
+        
+        const updatedMessages = [...s.conversationMessages];
+        updatedMessages[messageIndex] = {
+          ...updatedMessages[messageIndex],
+          content,
+          isStreaming: true
+        };
+        
+        return {
+          conversationMessages: updatedMessages,
+          streamingState: {
+            ...s.streamingState,
+            tokenCount: content.length
+          }
+        };
+      }),
+      
+      completeStreaming: (messageId, finalContent) => set((s) => {
+        const messageIndex = s.conversationMessages.findIndex(m => m.id === messageId);
+        if (messageIndex === -1) return s;
+        
+        const updatedMessages = [...s.conversationMessages];
+        updatedMessages[messageIndex] = {
+          ...updatedMessages[messageIndex],
+          content: finalContent || updatedMessages[messageIndex].content,
+          isStreaming: false,
+          streamingError: undefined
+        };
+        
+        return {
+          conversationMessages: updatedMessages,
+          streamingState: {
+            isActive: false,
+            currentMessageId: undefined,
+            transportMode: undefined,
+            error: undefined,
+            startTime: undefined,
+            tokenCount: 0
+          }
+        };
+      }),
+      
+      errorStreaming: (messageId, error) => set((s) => {
+        const messageIndex = s.conversationMessages.findIndex(m => m.id === messageId);
+        if (messageIndex === -1) return s;
+        
+        const updatedMessages = [...s.conversationMessages];
+        updatedMessages[messageIndex] = {
+          ...updatedMessages[messageIndex],
+          isStreaming: false,
+          streamingError: error
+        };
+        
+        return {
+          conversationMessages: updatedMessages,
+          streamingState: {
+            isActive: false,
+            currentMessageId: undefined,
+            transportMode: undefined,
+            error,
+            startTime: undefined,
+            tokenCount: 0
+          }
+        };
+      }),
+      
+      stopStreaming: () => set(() => ({
+        streamingState: {
+          isActive: false,
+          currentMessageId: undefined,
+          transportMode: undefined,
+          error: undefined,
+          startTime: undefined,
+          tokenCount: 0
+        }
+      })),
+      
+      createStreamingMessage: (type, player, round, pick) => {
+        const messageId = `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const message: ConversationMessage = {
+          id: messageId,
+          type,
+          content: '',
+          timestamp: Date.now(),
+          player,
+          round,
+          pick,
+          isStreaming: true,
+          streamingError: undefined
+        };
+        
+        set((s) => ({
+          conversationMessages: [...s.conversationMessages, message]
+        }));
+        
+        return messageId;
+      },
+
+      // Offline mode actions
+      setOfflineMode: (isOffline) => set({ isOfflineMode: isOffline }),
+      
+      setShowOfflineBanner: (show) => set({ showOfflineBanner: show }),
+      
+      dismissOfflineBanner: () => set({ showOfflineBanner: false }),
+      
+      addPendingApiCall: (type, payload) => set((s) => ({
+        pendingApiCalls: [...s.pendingApiCalls, {
+          id: `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          type,
+          payload,
+          timestamp: Date.now()
+        }]
+      })),
+      
+      clearPendingApiCalls: () => set({ pendingApiCalls: [] }),
+      
+      initializeDraftOffline: (config) => set({
+        draftConfig: config,
+        draftInitialized: true,
+        strategy: 'Offline mode: AI analysis not available. You can still track your draft and mark players as drafted or taken.',
+        conversationMessages: [{
+          id: 'offline-strategy',
+          type: 'strategy',
+          content: 'Offline mode: AI analysis is not available, but you can still manage your draft. Mark players as "Drafted" when you pick them and "Taken" when other teams pick them.',
+          timestamp: Date.now()
+        }]
+      }),
     }),
     {
       name: 'bff-draft-store',

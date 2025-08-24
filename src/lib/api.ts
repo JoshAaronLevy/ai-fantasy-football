@@ -2,18 +2,8 @@ import type { Player } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''; // if set, use it; else use Vite proxy
 
-// TypeScript interfaces for API responses
-export interface InitializeDraftRequest {
-  numTeams: number;
-  userPickPosition: number;
-  players: Player[];
-}
-
-export interface InitializeDraftResponse {
-  success: true;
-  strategy: string;
-  conversationId: string;
-}
+// LEGACY: Initialize interfaces removed - now using streaming payload format
+// New format: { action: "initialize", conversationId: null, user: uuid, payload: { numTeams, userPickPosition, players } }
 
 export interface PlayerTakenRequest {
   player: Player;
@@ -69,15 +59,8 @@ export async function fetchPlayers(): Promise<Player[]> {
   return makeApiRequest<Player[]>('/players');
 }
 
-// Initialize draft with Dify AI
-export async function initializeDraft(
-  request: InitializeDraftRequest
-): Promise<InitializeDraftResponse> {
-  return makeApiRequest<InitializeDraftResponse>('/draft/initialize', {
-    method: 'POST',
-    body: JSON.stringify(request),
-  });
-}
+// LEGACY: initializeDraft function removed - now using streaming via useLlmStream hook
+// Initialize requests should use: POST /api/llm/stream with { action: "initialize", ... }
 
 // Notify AI when a player is taken in the draft
 export async function playerTaken(

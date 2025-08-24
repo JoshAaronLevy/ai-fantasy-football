@@ -36,8 +36,7 @@ export function useLlmStream() {
       abortRef.current = new AbortController();
       
       try {
-        // COMMENT: This body format is CORRECT for new backend but DraftConfigModal doesn't use this hook!
-        // COMMENT: DraftConfigModal calls initializeDraft() directly which uses wrong endpoint/format
+        // This body format is correct for the new backend streaming endpoint
         const body = {
           action: p.action,
           conversationId: conv,

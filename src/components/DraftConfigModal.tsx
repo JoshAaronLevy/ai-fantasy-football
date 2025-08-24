@@ -70,9 +70,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const isFormValid = selectedTeams !== null && selectedPick !== null
 
   const handleLetsDraft = async () => {
-    console.log('1/4: User clicked "Let\'s Draft!" button', { teams: selectedTeams, pick: selectedPick })
-    
-    if (!isFormValid || !selectedTeams || !selectedPick) return
+    if (!isFormValid || !selectedTeams || !selectedPick || isStreaming) return
 
     const config = { teams: selectedTeams, pick: selectedPick }
 
@@ -93,6 +91,22 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       return
     }
 
+    // Prepare players payload - limit to top 200 available players
+    const availablePlayers = players
+      .filter(player => !isDrafted(player.id) && !isTaken(player.id))
+      .slice(0, 200);
+
+    const payload = {
+      numTeams: selectedTeams,
+      userPickPosition: selectedPick,
+      players: availablePlayers
+    }
+
+    // DEV logs before initialize
+    if (import.meta.env.DEV) {
+      console.log('[INIT][click] payload:', { numTeams: selectedTeams, userPickPosition: selectedPick, playersCount: availablePlayers.length });
+    }
+
     // Show loading toast
     toast.current?.show({
       severity: 'info',
@@ -103,30 +117,14 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     })
 
     try {
-      // Prepare players payload - limit to top 200 available players
-      const availablePlayers = players
-        .filter(player => !isDrafted(player.id) && !isTaken(player.id))
-        .slice(0, 200);
-
-      const payload = {
-        numTeams: selectedTeams,
-        userPickPosition: selectedPick,
-        players: availablePlayers
-      }
-      
-      console.log('2/4: About to make streaming API call', {
-        action: 'initialize',
-        numTeams: payload.numTeams,
-        userPickPosition: payload.userPickPosition,
-        playersCount: payload.players.length
-      })
-
       // Use streaming hook with correct payload format
       await startStream({
         scope: 'draft',
         action: 'initialize',
         payload
       })
+
+      console.log('[INIT][start] called useLlmStream');
 
       // Clear the loading toast
       toast.current?.clear()
