@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Player } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''; // if set, use it; else use Vite proxy
@@ -80,4 +81,66 @@ export async function userTurn(
     method: 'POST',
     body: JSON.stringify(request),
   });
+}
+
+// Blocking draft initialization
+export async function initializeDraftBlocking(params: {
+  user: string;
+  conversationId: string | null;
+  payload: {
+    numTeams: number;
+    userPickPosition: number;
+    players: Array<Record<string, any>>;
+  };
+}): Promise<{ ok: true; conversationId: string | null; answer: string | null; raw?: any }> {
+  const res = await fetch('/api/draft/initialize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  
+  if (!res.ok) {
+    throw new Error(`Initialize request failed: ${res.status}`);
+  }
+  
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(`Initialize failed: ${data.error || 'Unknown error'}`);
+  }
+  
+  return {
+    ok: true,
+    conversationId: data.conversationId || null,
+    answer: data.answer || null,
+    raw: data
+  };
+}
+
+// Blocking draft reset
+export async function resetDraftBlocking(params: {
+  user: string;
+}): Promise<{ ok: true; resetAcknowledged: true }> {
+  const res = await fetch('/api/draft/reset', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  
+  if (!res.ok) {
+    throw new Error(`Reset request failed: ${res.status}`);
+  }
+  
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(`Reset failed: ${data.error || 'Unknown error'}`);
+  }
+  
+  return {
+    ok: true,
+    resetAcknowledged: true
+  };
 }

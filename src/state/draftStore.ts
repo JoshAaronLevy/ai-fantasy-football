@@ -35,6 +35,7 @@ type DraftState = {
   draftInitialized: boolean;
   conversationMessages: ConversationMessage[];
   isApiLoading: boolean;
+  aiAnswer: string;
   
   // Streaming state
   streamingState: StreamingState;
@@ -73,6 +74,9 @@ type DraftState = {
   setApiLoading: (loading: boolean) => void;
   markPlayerTaken: (playerId: string, player: Player, confirmation: string, newConversationId?: string) => void;
   markUserTurn: (playerId: string, player: Player, analysis: string, round: number, pick: number, newConversationId?: string) => void;
+  setAiAnswer: (answer: string) => void;
+  clearAiAnswer: () => void;
+  clearLocalState: () => void;
   
   // Streaming actions
   startStreaming: (messageId: string, transportMode: 'fetch' | 'sse') => void;
@@ -130,6 +134,7 @@ export const useDraftStore = create<DraftState>()(
       draftInitialized: false,
       conversationMessages: [],
       isApiLoading: false,
+      aiAnswer: '',
       
       // Streaming state
       streamingState: {
@@ -236,6 +241,7 @@ export const useDraftStore = create<DraftState>()(
         draftInitialized: false,
         conversationMessages: [],
         isApiLoading: false,
+        aiAnswer: '',
         streamingState: {
           isActive: false,
           currentMessageId: undefined,
@@ -294,6 +300,20 @@ export const useDraftStore = create<DraftState>()(
       })),
       
       setApiLoading: (isApiLoading) => set({ isApiLoading }),
+      
+      setAiAnswer: (answer) => set({ aiAnswer: answer }),
+      
+      clearAiAnswer: () => set({ aiAnswer: '' }),
+      
+      clearLocalState: () => set({
+        aiAnswer: '',
+        drafted: {},
+        myTeam: {},
+        taken: {},
+        actionHistory: [],
+        currentRound: 1,
+        conversationMessages: []
+      }),
       
       markPlayerTaken: (playerId, player, confirmation, newConversationId) => set((s) => {
         // First mark the player as taken in the normal way

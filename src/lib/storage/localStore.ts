@@ -20,6 +20,10 @@ export function setConversationId(scope: string, id: string): void {
   localStorage.setItem(k(`${scope}.conversationId`), id);
 }
 
+export function clearConversationId(scope: string): void {
+  localStorage.removeItem(k(`${scope}.conversationId`));
+}
+
 export function getJSON<T>(key: string, fallback: T): T {
   try { 
     const raw = localStorage.getItem(k(key)); 

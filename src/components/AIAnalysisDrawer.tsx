@@ -27,6 +27,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const players = useDraftStore((s) => s.players)
   const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
   const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
+  const aiAnswer = useDraftStore((s) => s.aiAnswer)
   
   // Store actions
   const startStreaming = useDraftStore((s) => s.startStreaming)
@@ -236,13 +237,20 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
             title={`AI Conversation ${conversationMessages.length > 0 ? `(${conversationMessages.length})` : ''}`}
             className="h-full"
           >
-            {/* Empty State */}
-            {!draftInitialized && (
+            {/* AI Answer Display */}
+            {aiAnswer.trim().length > 0 ? (
+              <div className="prose whitespace-pre-wrap p-4 bg-blue-50 rounded-lg">
+                <div className="text-sm font-medium mb-2 text-blue-800">AI Draft Strategy:</div>
+                <div className="text-sm text-gray-700 leading-relaxed">
+                  {aiAnswer}
+                </div>
+              </div>
+            ) : !draftInitialized ? (
               <div className="text-center text-gray-500 py-8">
                 <i className="pi pi-robot text-4xl mb-4 block"></i>
                 <h3 className="text-lg font-semibold mb-2">Start Your AI-Powered Draft</h3>
                 <p className="text-sm mb-4">
-                  Configure your draft settings to get personalized AI strategy and recommendations.
+                  The AI assistant will generate your draft strategy here…
                 </p>
                 
                 <div className="mt-4 p-4 bg-blue-50 rounded-lg text-left">
@@ -258,6 +266,13 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                     4. Get real-time AI analysis and recommendations
                   </p>
                 </div>
+              </div>
+            ) : (
+              <div className="text-center text-gray-500 py-8">
+                <i className="pi pi-robot text-4xl mb-4 block"></i>
+                <p className="text-sm">
+                  The AI assistant will generate your draft strategy here…
+                </p>
               </div>
             )}
 

@@ -7,7 +7,9 @@ import { Message } from 'primereact/message'
 import { Toast } from 'primereact/toast'
 import { useDraftStore } from '../state/draftStore'
 import { useLlmStream } from '../hooks/useLlmStream'
-import { getUserId } from '../lib/storage/localStore'
+import { getUserId, getConversationId, setConversationId } from '../lib/storage/localStore'
+import { initializeDraftBlocking } from '../lib/api'
+import { pickTopPlayersForInit } from '../lib/players/pickTop'
 
 interface DraftConfigModalProps {
   visible: boolean;
@@ -27,14 +29,16 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     setOfflineMode,
     setShowOfflineBanner,
     addPendingApiCall,
-    initializeDraftOffline
+    initializeDraftOffline,
+    setAiAnswer
   } = useDraftStore()
   
   const [selectedTeams, setSelectedTeams] = React.useState<number | null>(draftConfig.teams)
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
   const [error, setError] = React.useState<string | null>(null)
+  const [isLoading, setIsLoading] = React.useState(false)
   
-  // Streaming hook for initialize
+  // Streaming hook for initialize (keeping for other actions)
   const [{ tokens, error: streamError, isStreaming, conversationId, lastEvent }, { start: startStream, abort: abortStream, clear: clearStream }] = useLlmStream()
 
   // Reset form when modal opens with current config
@@ -69,17 +73,25 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
 
   const isFormValid = selectedTeams !== null && selectedPick !== null
 
-  const handleLetsDraft = async () => {
-    if (!isFormValid || !selectedTeams || !selectedPick || isStreaming) return
+  const onLetsDraft = async () => {
+    if (!isFormValid || !selectedTeams || !selectedPick || players.length === 0) return
 
     const config = { teams: selectedTeams, pick: selectedPick }
+
+    // Validate players dataset
+    if (players.length === 0) {
+      setError('No players available. Please ensure player data is loaded.');
+      return;
+    }
+
+    setIsLoading(true)
+    setError(null)
 
     // Close modal immediately
     onHide()
 
     // Check if we're already in offline mode
     if (isOfflineMode) {
-      console.log('1.3/4: App is in offline mode, initializing offline draft')
       initializeDraftOffline(config)
       toast.current?.show({
         severity: 'info',
@@ -88,55 +100,41 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 3000
       })
       onDraftInitialized?.()
+      setIsLoading(false)
       return
     }
 
-    // Prepare players payload - limit to top 200 available players
+    // Build body for blocking API call
     const availablePlayers = players
       .filter(player => !isDrafted(player.id) && !isTaken(player.id))
-      .slice(0, 200);
 
-    const payload = {
-      numTeams: selectedTeams,
-      userPickPosition: selectedPick,
-      players: availablePlayers
+    const body = {
+      user: getUserId(),
+      conversationId: getConversationId('draft') || null,
+      payload: {
+        numTeams: selectedTeams,
+        userPickPosition: selectedPick,
+        players: pickTopPlayersForInit(availablePlayers, 25)
+      }
     }
-
-    // DEV logs before initialize
-    if (import.meta.env.DEV) {
-      console.log('[INIT][click] payload:', { numTeams: selectedTeams, userPickPosition: selectedPick, playersCount: availablePlayers.length });
-    }
-
-    // Show loading toast
-    toast.current?.show({
-      severity: 'info',
-      summary: 'Initializing Draft',
-      detail: 'Setting up your draft with AI analysis...',
-      life: 0,
-      sticky: true
-    })
 
     try {
-      // Use streaming hook with correct payload format
-      await startStream({
-        scope: 'draft',
-        action: 'initialize',
-        payload
-      })
+      const data = await initializeDraftBlocking(body)
 
-      console.log('[INIT][start] called useLlmStream');
-
-      // Clear the loading toast
-      toast.current?.clear()
-
-      // Store the streaming response data in the draft store
-      if (conversationId) {
-        initializeDraftState(
-          conversationId,
-          tokens || 'Draft strategy initialized via streaming.',
-          config
-        )
+      // If data.conversationId: setConversationId('draft', data.conversationId)
+      if (data.conversationId) {
+        setConversationId('draft', data.conversationId)
       }
+
+      // Set AI answer in store
+      setAiAnswer(data.answer ?? '')
+
+      // Initialize draft state
+      initializeDraftState(
+        data.conversationId || '',
+        data.answer || 'Draft strategy initialized.',
+        config
+      )
 
       // Show success toast
       toast.current?.show({
@@ -146,17 +144,9 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 3000
       })
 
-      // Trigger AI Analysis drawer
+      // Open AI drawer
       onDraftInitialized?.()
     } catch (err) {
-      console.log('4/4: Streaming call failed with error', {
-        error: err instanceof Error ? err.message : String(err),
-        streamError
-      })
-      
-      // Clear the loading toast
-      toast.current?.clear()
-
       // Enter offline mode and set up offline draft
       setOfflineMode(true)
       setShowOfflineBanner(true)
@@ -166,11 +156,11 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       addPendingApiCall('initializeDraft', {
         numTeams: selectedTeams,
         userPickPosition: selectedPick,
-        players: players.filter(player => !isDrafted(player.id) && !isTaken(player.id)).slice(0, 200)
+        players: availablePlayers.slice(0, 200)
       })
 
-      // Show error toast with streaming error if available
-      const errorMessage = streamError || (err instanceof Error ? err.message : 'Failed to initialize draft')
+      // Show error message
+      const errorMessage = err instanceof Error ? err.message : 'Initialize failed'
       toast.current?.show({
         severity: 'error',
         summary: 'Unable to initialize draft',
@@ -180,6 +170,8 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
 
       // Still trigger the drawer since we have offline functionality
       onDraftInitialized?.()
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -281,22 +273,13 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
 
         <div className="flex justify-center gap-3 pt-4 mt-4">
           <Button
-            label={isStreaming ? 'Initializing…' : "Let's Draft!"}
-            onClick={handleLetsDraft}
-            disabled={!isFormValid || isStreaming}
+            label={isLoading ? 'Initializing…' : "Let's Draft!"}
+            onClick={onLetsDraft}
+            disabled={!isFormValid || isLoading || players.length === 0}
             className="p-button-success"
             style={{ minWidth: '120px' }}
           />
-          {isStreaming && (
-            <Button
-              label="Stop"
-              onClick={abortStream}
-              className="p-button-danger"
-              outlined
-              style={{ minWidth: '100px' }}
-            />
-          )}
-          {!isStreaming && (
+          {!isLoading && (
             <Button
               label="Cancel"
               onClick={handleDismiss}

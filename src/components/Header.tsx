@@ -1,12 +1,42 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React from 'react'
 import { Toolbar } from 'primereact/toolbar'
 import { Button } from 'primereact/button'
+import { resetDraftBlocking } from '../lib/api'
+import { getUserId, clearConversationId } from '../lib/storage/localStore'
+import { useDraftStore } from '../state/draftStore'
 
 interface HeaderProps {
   onViewAIAnalysis?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
+  const [isResetting, setIsResetting] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const { clearAiAnswer, clearLocalState } = useDraftStore()
+
+  const onReset = async () => {
+    setIsResetting(true)
+    setError(null)
+
+    try {
+      await resetDraftBlocking({ user: getUserId() })
+      
+      // Clear localStorage conversation ID and state
+      clearConversationId('draft')
+      clearAiAnswer()
+      clearLocalState()
+
+      // Optionally show success (could use toast if available)
+      console.log('Draft reset successfully')
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Reset failed'
+      setError(errorMessage)
+      console.error('Reset failed:', errorMessage)
+    } finally {
+      setIsResetting(false)
+    }
+  }
   const startContent = (
     <div className="flex items-center gap-3">
       <div style={{
@@ -32,7 +62,24 @@ export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
   )
 
   const endContent = (
-    <div className="flex items-center">
+    <div className="flex items-center gap-3">
+      <Button
+        label="Reset"
+        icon="pi pi-refresh"
+        onClick={onReset}
+        disabled={isResetting}
+        size="large"
+        style={{
+          backgroundColor: 'rgba(255, 255, 255, 0.1)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          color: 'white',
+          fontWeight: '600',
+          padding: '0.75rem 1.5rem',
+          fontSize: '1rem'
+        }}
+        className="hover-bg-white-20 transition-colors"
+      />
       <Button
         label="View AI Analysis"
         icon="pi pi-chart-line"
