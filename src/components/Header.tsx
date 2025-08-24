@@ -64,23 +64,6 @@ export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
   const endContent = (
     <div className="flex items-center gap-3">
       <Button
-        label="Reset"
-        icon="pi pi-refresh"
-        onClick={onReset}
-        disabled={isResetting}
-        size="large"
-        style={{
-          backgroundColor: 'rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          color: 'white',
-          fontWeight: '600',
-          padding: '0.75rem 1.5rem',
-          fontSize: '1rem'
-        }}
-        className="hover-bg-white-20 transition-colors"
-      />
-      <Button
         label="View AI Analysis"
         icon="pi pi-chart-line"
         onClick={onViewAIAnalysis}

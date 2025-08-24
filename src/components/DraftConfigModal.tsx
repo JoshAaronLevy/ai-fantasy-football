@@ -30,13 +30,14 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     setShowOfflineBanner,
     addPendingApiCall,
     initializeDraftOffline,
-    setAiAnswer
+    setAiAnswer,
+    isInitializingDraft,
+    setIsInitializingDraft
   } = useDraftStore()
   
   const [selectedTeams, setSelectedTeams] = React.useState<number | null>(draftConfig.teams)
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
   const [error, setError] = React.useState<string | null>(null)
-  const [isLoading, setIsLoading] = React.useState(false)
   
   // Streaming hook for initialize (keeping for other actions)
   const [{ tokens, error: streamError, isStreaming, conversationId, lastEvent }, { start: startStream, abort: abortStream, clear: clearStream }] = useLlmStream()
@@ -84,7 +85,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       return;
     }
 
-    setIsLoading(true)
+    setIsInitializingDraft(true)
     setError(null)
 
     // Close modal immediately
@@ -100,7 +101,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 3000
       })
       onDraftInitialized?.()
-      setIsLoading(false)
+      setIsInitializingDraft(false)
       return
     }
 
@@ -171,7 +172,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       // Still trigger the drawer since we have offline functionality
       onDraftInitialized?.()
     } finally {
-      setIsLoading(false)
+      setIsInitializingDraft(false)
     }
   }
 
@@ -273,13 +274,13 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
 
         <div className="flex justify-center gap-3 pt-4 mt-4">
           <Button
-            label={isLoading ? 'Initializing…' : "Let's Draft!"}
+            label={isInitializingDraft ? 'Initializing…' : "Let's Draft!"}
             onClick={onLetsDraft}
-            disabled={!isFormValid || isLoading || players.length === 0}
+            disabled={!isFormValid || isInitializingDraft || players.length === 0}
             className="p-button-success"
             style={{ minWidth: '120px' }}
           />
-          {!isLoading && (
+          {!isInitializingDraft && (
             <Button
               label="Cancel"
               onClick={handleDismiss}

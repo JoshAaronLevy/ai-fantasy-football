@@ -5,7 +5,7 @@ import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
 import App from './App.tsx'
 import './index.css'
 
-// PrimeReact CSS imports
+// PrimeReact CSS imports (needed for existing components)
 import 'primereact/resources/themes/lara-dark-blue/theme.css'
 import 'primereact/resources/primereact.min.css'
 import 'primeicons/primeicons.css'

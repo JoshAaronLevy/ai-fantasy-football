@@ -35,6 +35,7 @@ type DraftState = {
   draftInitialized: boolean;
   conversationMessages: ConversationMessage[];
   isApiLoading: boolean;
+  isInitializingDraft: boolean;
   aiAnswer: string;
   
   // Streaming state
@@ -72,6 +73,7 @@ type DraftState = {
   initializeDraftState: (conversationId: string, strategy: string, config: DraftConfiguration) => void;
   addConversationMessage: (message: ConversationMessage) => void;
   setApiLoading: (loading: boolean) => void;
+  setIsInitializingDraft: (loading: boolean) => void;
   markPlayerTaken: (playerId: string, player: Player, confirmation: string, newConversationId?: string) => void;
   markUserTurn: (playerId: string, player: Player, analysis: string, round: number, pick: number, newConversationId?: string) => void;
   setAiAnswer: (answer: string) => void;
@@ -134,6 +136,7 @@ export const useDraftStore = create<DraftState>()(
       draftInitialized: false,
       conversationMessages: [],
       isApiLoading: false,
+      isInitializingDraft: false,
       aiAnswer: '',
       
       // Streaming state
@@ -241,6 +244,7 @@ export const useDraftStore = create<DraftState>()(
         draftInitialized: false,
         conversationMessages: [],
         isApiLoading: false,
+        isInitializingDraft: false,
         aiAnswer: '',
         streamingState: {
           isActive: false,
@@ -300,6 +304,8 @@ export const useDraftStore = create<DraftState>()(
       })),
       
       setApiLoading: (isApiLoading) => set({ isApiLoading }),
+      
+      setIsInitializingDraft: (isInitializingDraft) => set({ isInitializingDraft }),
       
       setAiAnswer: (answer) => set({ aiAnswer: answer }),
       

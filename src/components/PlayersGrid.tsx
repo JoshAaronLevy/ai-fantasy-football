@@ -722,32 +722,6 @@ export const PlayersGrid: React.FC = () => {
             color: '#475569'
           }}
         />
-        <Button
-          label="Reset Conversation"
-          icon="pi pi-trash"
-          onClick={() => {
-            // Remove conversation ID from localStorage
-            localStorage.removeItem('app.draft.conversationId');
-            // Clear streaming UI state
-            clear();
-            // Show confirmation toast
-            toast.current?.show({
-              severity: 'info',
-              summary: 'Conversation Reset',
-              detail: 'AI conversation history cleared.',
-              life: 2000
-            });
-          }}
-          className="p-button-secondary"
-          size="small"
-          tooltip="Reset AI conversation (keeps draft picks)"
-          tooltipOptions={{ position: 'bottom' }}
-          style={{
-            backgroundColor: '#f1f5f9',
-            borderColor: '#cbd5e1',
-            color: '#475569'
-          }}
-        />
       </div>
 
       {/* Search and filter controls */}
