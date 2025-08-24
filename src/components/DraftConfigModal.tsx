@@ -1,24 +1,41 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React from 'react'
 import { Dialog } from 'primereact/dialog'
 import { Dropdown } from 'primereact/dropdown'
 import { Button } from 'primereact/button'
 import { Message } from 'primereact/message'
+import { Toast } from 'primereact/toast'
 import { useDraftStore } from '../state/draftStore'
-import { initializeDraft } from '../lib/api'
+import { useLlmStream } from '../hooks/useLlmStream'
+import { getUserId } from '../lib/storage/localStore'
 
 interface DraftConfigModalProps {
   visible: boolean;
   onHide: () => void;
   onDraftInitialized?: () => void;
+  toast: React.RefObject<Toast>;
 }
 
-export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onHide, onDraftInitialized }) => {
-  const { draftConfig, players, initializeDraftState } = useDraftStore()
+export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onHide, onDraftInitialized, toast }) => {
+  const {
+    draftConfig,
+    players,
+    initializeDraftState,
+    isDrafted,
+    isTaken,
+    isOfflineMode,
+    setOfflineMode,
+    setShowOfflineBanner,
+    addPendingApiCall,
+    initializeDraftOffline
+  } = useDraftStore()
   
   const [selectedTeams, setSelectedTeams] = React.useState<number | null>(draftConfig.teams)
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
-  const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  
+  // Streaming hook for initialize
+  const [{ tokens, error: streamError, isStreaming, conversationId, lastEvent }, { start: startStream, abort: abortStream, clear: clearStream }] = useLlmStream()
 
   // Reset form when modal opens with current config
   React.useEffect(() => {
@@ -50,36 +67,121 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     }))
   }, [selectedTeams])
 
-  const isFormValid = selectedTeams !== null && selectedPick !== null && !isLoading
+  const isFormValid = selectedTeams !== null && selectedPick !== null
 
   const handleLetsDraft = async () => {
+    console.log('1/4: User clicked "Let\'s Draft!" button', { teams: selectedTeams, pick: selectedPick })
+    
     if (!isFormValid || !selectedTeams || !selectedPick) return
 
-    setIsLoading(true)
-    setError(null)
+    const config = { teams: selectedTeams, pick: selectedPick }
+
+    // Close modal immediately
+    onHide()
+
+    // Check if we're already in offline mode
+    if (isOfflineMode) {
+      console.log('1.3/4: App is in offline mode, initializing offline draft')
+      initializeDraftOffline(config)
+      toast.current?.show({
+        severity: 'info',
+        summary: 'Draft Initialized (Offline)',
+        detail: 'Draft configuration saved. AI analysis unavailable in offline mode.',
+        life: 3000
+      })
+      onDraftInitialized?.()
+      return
+    }
+
+    // Show loading toast
+    toast.current?.show({
+      severity: 'info',
+      summary: 'Initializing Draft',
+      detail: 'Setting up your draft with AI analysis...',
+      life: 0,
+      sticky: true
+    })
 
     try {
-      const response = await initializeDraft({
+      // Prepare players payload - limit to top 200 available players
+      const availablePlayers = players
+        .filter(player => !isDrafted(player.id) && !isTaken(player.id))
+        .slice(0, 200);
+
+      const payload = {
         numTeams: selectedTeams,
         userPickPosition: selectedPick,
-        players: players
+        players: availablePlayers
+      }
+      
+      console.log('2/4: About to make streaming API call', {
+        action: 'initialize',
+        numTeams: payload.numTeams,
+        userPickPosition: payload.userPickPosition,
+        playersCount: payload.players.length
       })
 
-      // Store the response data in the draft store
-      initializeDraftState(
-        response.conversationId,
-        response.strategy,
-        { teams: selectedTeams, pick: selectedPick }
-      )
+      // Use streaming hook with correct payload format
+      await startStream({
+        scope: 'draft',
+        action: 'initialize',
+        payload
+      })
 
-      // Close modal and trigger AI Analysis drawer
-      onHide()
+      // Clear the loading toast
+      toast.current?.clear()
+
+      // Store the streaming response data in the draft store
+      if (conversationId) {
+        initializeDraftState(
+          conversationId,
+          tokens || 'Draft strategy initialized via streaming.',
+          config
+        )
+      }
+
+      // Show success toast
+      toast.current?.show({
+        severity: 'success',
+        summary: 'Draft Initialized',
+        detail: 'AI analysis is ready! Check the AI Analysis drawer for insights.',
+        life: 3000
+      })
+
+      // Trigger AI Analysis drawer
       onDraftInitialized?.()
     } catch (err) {
-      console.error('Failed to initialize draft:', err)
-      setError(err instanceof Error ? err.message : 'Failed to initialize draft')
-    } finally {
-      setIsLoading(false)
+      console.log('4/4: Streaming call failed with error', {
+        error: err instanceof Error ? err.message : String(err),
+        streamError
+      })
+      
+      // Clear the loading toast
+      toast.current?.clear()
+
+      // Enter offline mode and set up offline draft
+      setOfflineMode(true)
+      setShowOfflineBanner(true)
+      initializeDraftOffline(config)
+
+      // Store the failed API call for potential retry
+      addPendingApiCall('initializeDraft', {
+        numTeams: selectedTeams,
+        userPickPosition: selectedPick,
+        players: players.filter(player => !isDrafted(player.id) && !isTaken(player.id)).slice(0, 200)
+      })
+
+      // Show error toast with streaming error if available
+      const errorMessage = streamError || (err instanceof Error ? err.message : 'Failed to initialize draft')
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Unable to initialize draft',
+        detail: `Network error: ${errorMessage}. Continuing in offline mode.`,
+        life: 5000
+      })
+
+      // Still trigger the drawer since we have offline functionality
+      onDraftInitialized?.()
     }
   }
 
@@ -115,10 +217,37 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
           />
         )}
         
+        {streamError && (
+          <Message
+            severity="error"
+            text={`Stream error: ${streamError}`}
+            className="w-full"
+          />
+        )}
+        
+        {players.length === 0 && (
+          <Message
+            severity="warn"
+            text="Add at least one player to begin."
+            className="w-full"
+          />
+        )}
+        
+        {lastEvent?.type === 'phase' && (
+          <div className="text-gray-500 text-xs">Phase: {lastEvent.step} {lastEvent.status ? `(status ${lastEvent.status})` : ''}</div>
+        )}
+        
+        {tokens && isStreaming && (
+          <div className="mt-4 p-3 bg-gray-100 rounded border">
+            <div className="text-sm font-medium mb-2">AI Strategy (streaming):</div>
+            <pre className="text-xs whitespace-pre-wrap max-h-32 overflow-y-auto">{tokens}</pre>
+          </div>
+        )}
+        
         <div>
           <label 
             htmlFor="teams-dropdown" 
-            className="block text-sm font-medium text-gray-700 mb-2"
+            className="block text-sm font-medium mt-4 mb-2"
           >
             How many teams are in the draft?
           </label>
@@ -136,7 +265,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         <div>
           <label 
             htmlFor="pick-dropdown" 
-            className="block text-sm font-medium text-gray-700 mb-2"
+            className="block text-sm font-medium mt-4 mb-2"
           >
             What pick are you?
           </label>
@@ -152,21 +281,32 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
           />
         </div>
 
-        <div className="flex justify-end gap-3 pt-4">
+        <div className="flex justify-center gap-3 pt-4 mt-4">
           <Button
-            label="Dismiss"
-            onClick={handleDismiss}
-            className="p-button-danger"
-            style={{ minWidth: '100px' }}
-          />
-          <Button
-            label={isLoading ? "Initializing..." : "Let's Draft!"}
+            label={isStreaming ? 'Initializing…' : "Let's Draft!"}
             onClick={handleLetsDraft}
-            disabled={!isFormValid}
-            loading={isLoading}
+            disabled={!isFormValid || isStreaming}
             className="p-button-success"
             style={{ minWidth: '120px' }}
           />
+          {isStreaming && (
+            <Button
+              label="Stop"
+              onClick={abortStream}
+              className="p-button-danger"
+              outlined
+              style={{ minWidth: '100px' }}
+            />
+          )}
+          {!isStreaming && (
+            <Button
+              label="Cancel"
+              onClick={handleDismiss}
+              className="p-button-secondary"
+              outlined
+              style={{ minWidth: '100px' }}
+            />
+          )}
         </div>
       </div>
     </Dialog>

@@ -1,0 +1,1 @@
+export const STREAM_DEBUG = import.meta.env.VITE_STREAM_DEBUG === '1';
