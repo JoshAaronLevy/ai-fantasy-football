@@ -475,3 +475,8 @@ body {
   padding: 1.5rem !important;
   background: white !important;
 }
+
+.modal-buttons {
+  display: flex !important;
+  justify-content: center !important;
+}

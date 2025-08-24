@@ -8,6 +8,8 @@ import { ProgressSpinner } from 'primereact/progressspinner'
 import { Message } from 'primereact/message'
 import { useDraftStore } from '../state/draftStore'
 import { useLlmStream } from '../hooks/useLlmStream'
+import { MarkdownRenderer } from './common/MarkdownRenderer'
+import { cleanLlmAnswer } from '../lib/streaming/cleanAnswer'
 import type { ConversationMessage, Player } from '../types'
 
 interface AIAnalysisDrawerProps {
@@ -195,15 +197,6 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
               />
             )}
           </div>
-          <Button
-            icon="pi pi-times"
-            onClick={onHide}
-            text
-            rounded
-            severity="secondary"
-            size="small"
-            style={{ color: 'white' }}
-          />
         </div>
       }
     >
@@ -237,12 +230,15 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
             title={`AI Conversation ${conversationMessages.length > 0 ? `(${conversationMessages.length})` : ''}`}
             className="h-full"
           >
-            {/* AI Answer Display */}
-            {aiAnswer.trim().length > 0 ? (
-              <div className="prose whitespace-pre-wrap p-4 bg-blue-50 rounded-lg">
+            {/* AI Answer Display - only show if no completed strategy message exists */}
+            {aiAnswer.trim().length > 0 && !conversationMessages.some(msg => msg.type === 'strategy' && !msg.isStreaming) ? (
+              <div className="p-4 bg-blue-50 rounded-lg">
                 <div className="text-sm font-medium mb-2 text-blue-800">AI Draft Strategy:</div>
-                <div className="text-sm text-gray-700 leading-relaxed">
-                  {aiAnswer}
+                <div className="overflow-auto max-h-[calc(100vh-12rem)]">
+                  <MarkdownRenderer
+                    content={cleanLlmAnswer(aiAnswer)}
+                    className="prose max-w-none text-sm text-gray-700 leading-relaxed"
+                  />
                 </div>
               </div>
             ) : !draftInitialized ? (
@@ -387,13 +383,19 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                             <span className="text-sm text-gray-600">Analyzing draft situation...</span>
                           </div>
                         ) : message.isStreaming ? (
-                          <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                            {message.content}
+                          <div className="text-sm text-gray-700 leading-relaxed">
+                            <MarkdownRenderer
+                              content={cleanLlmAnswer(message.content)}
+                              className="prose max-w-none text-sm inline"
+                            />
                             <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1"></span>
                           </div>
                         ) : (
-                          <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                            {message.content}
+                          <div className="text-sm text-gray-700 leading-relaxed">
+                            <MarkdownRenderer
+                              content={cleanLlmAnswer(message.content)}
+                              className="prose max-w-none text-sm"
+                            />
                           </div>
                         )}
 

@@ -5,7 +5,6 @@ import { PlayersGrid } from './components/PlayersGrid'
 import { DraftConfigModal } from './components/DraftConfigModal'
 import { AIAnalysisDrawer } from './components/AIAnalysisDrawer'
 import { OfflineBanner } from './components/OfflineBanner'
-import { LoadingModal } from './components/LoadingModal'
 import { useDraftStore } from './state/draftStore'
 import { fetchPlayers } from './lib/api'
 
@@ -17,7 +16,6 @@ export default function App() {
   const players = useDraftStore((s) => s.players)
   const setOfflineMode = useDraftStore((s) => s.setOfflineMode)
   const setShowOfflineBanner = useDraftStore((s) => s.setShowOfflineBanner)
-  const isInitializingDraft = useDraftStore((s) => s.isInitializingDraft)
   
   const [showConfigModal, setShowConfigModal] = React.useState(false)
   const [showAIAnalysis, setShowAIAnalysis] = React.useState(false)
@@ -87,7 +85,6 @@ export default function App() {
         visible={showAIAnalysis}
         onHide={() => setShowAIAnalysis(false)}
       />
-      <LoadingModal visible={isInitializingDraft} />
     </div>
   )
 }

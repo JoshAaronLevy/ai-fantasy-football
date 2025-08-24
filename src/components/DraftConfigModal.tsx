@@ -10,6 +10,7 @@ import { useLlmStream } from '../hooks/useLlmStream'
 import { getUserId, getConversationId, setConversationId } from '../lib/storage/localStore'
 import { initializeDraftBlocking } from '../lib/api'
 import { pickTopPlayersForInit } from '../lib/players/pickTop'
+import { LoadingModal } from './LoadingModal'
 
 interface DraftConfigModalProps {
   visible: boolean;
@@ -30,14 +31,13 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     setShowOfflineBanner,
     addPendingApiCall,
     initializeDraftOffline,
-    setAiAnswer,
-    isInitializingDraft,
-    setIsInitializingDraft
+    setAiAnswer
   } = useDraftStore()
   
   const [selectedTeams, setSelectedTeams] = React.useState<number | null>(draftConfig.teams)
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
   const [error, setError] = React.useState<string | null>(null)
+  const [isInitializing, setIsInitializing] = React.useState(false)
   
   // Streaming hook for initialize (keeping for other actions)
   const [{ tokens, error: streamError, isStreaming, conversationId, lastEvent }, { start: startStream, abort: abortStream, clear: clearStream }] = useLlmStream()
@@ -75,6 +75,14 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const isFormValid = selectedTeams !== null && selectedPick !== null
 
   const onLetsDraft = async () => {
+    console.debug('INIT DRAFT: click handler invoked');
+
+    // Early return guard for duplicate clicks
+    if (isInitializing) {
+      console.debug('INIT DRAFT: blocked (already initializing)');
+      return;
+    }
+
     if (!isFormValid || !selectedTeams || !selectedPick || players.length === 0) return
 
     const config = { teams: selectedTeams, pick: selectedPick }
@@ -85,42 +93,53 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       return;
     }
 
-    setIsInitializingDraft(true)
+    setIsInitializing(true)
     setError(null)
-
-    // Close modal immediately
-    onHide()
 
     // Check if we're already in offline mode
     if (isOfflineMode) {
-      initializeDraftOffline(config)
-      toast.current?.show({
-        severity: 'info',
-        summary: 'Draft Initialized (Offline)',
-        detail: 'Draft configuration saved. AI analysis unavailable in offline mode.',
-        life: 3000
-      })
-      onDraftInitialized?.()
-      setIsInitializingDraft(false)
+      try {
+        initializeDraftOffline(config)
+        toast.current?.show({
+          severity: 'info',
+          summary: 'Draft Initialized (Offline)',
+          detail: 'Draft configuration saved. AI analysis unavailable in offline mode.',
+          life: 3000
+        })
+        onHide()
+        onDraftInitialized?.()
+      } finally {
+        setIsInitializing(false)
+      }
       return
     }
 
-    // Build body for blocking API call
-    const availablePlayers = players
-      .filter(player => !isDrafted(player.id) && !isTaken(player.id))
-
-    const body = {
-      user: getUserId(),
-      conversationId: getConversationId('draft') || null,
-      payload: {
-        numTeams: selectedTeams,
-        userPickPosition: selectedPick,
-        players: pickTopPlayersForInit(availablePlayers, 25)
-      }
-    }
-
     try {
+      // Build body for blocking API call with slimmed payload
+      const availablePlayers = players
+        .filter(player => !isDrafted(player.id) && !isTaken(player.id))
+
+      const slimmedPlayers = pickTopPlayersForInit(availablePlayers, 25)
+      
+      const body = {
+        user: getUserId(),
+        conversationId: getConversationId('draft') || null,
+        payload: {
+          numTeams: selectedTeams,
+          userPickPosition: selectedPick,
+          players: slimmedPlayers
+        }
+      }
+
+      // Log payload size in dev mode
+      if (import.meta.env.DEV) {
+        const bytes = new TextEncoder().encode(JSON.stringify(body)).length
+        console.log('[INIT payload bytes]', bytes)
+      }
+
+      console.debug('INIT DRAFT: calling initialize API');
       const data = await initializeDraftBlocking(body)
+      console.debug('INIT DRAFT: initialize API success');
 
       // If data.conversationId: setConversationId('draft', data.conversationId)
       if (data.conversationId) {
@@ -145,15 +164,20 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 3000
       })
 
-      // Open AI drawer
+      // Close modal and open AI drawer
+      onHide()
       onDraftInitialized?.()
     } catch (err) {
+      console.debug('INIT DRAFT: initialize API error', err);
       // Enter offline mode and set up offline draft
       setOfflineMode(true)
       setShowOfflineBanner(true)
       initializeDraftOffline(config)
 
       // Store the failed API call for potential retry
+      const availablePlayers = players
+        .filter(player => !isDrafted(player.id) && !isTaken(player.id))
+      
       addPendingApiCall('initializeDraft', {
         numTeams: selectedTeams,
         userPickPosition: selectedPick,
@@ -169,10 +193,12 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 5000
       })
 
-      // Still trigger the drawer since we have offline functionality
+      // Close modal and still trigger the drawer since we have offline functionality
+      onHide()
       onDraftInitialized?.()
     } finally {
-      setIsInitializingDraft(false)
+      console.debug('INIT DRAFT: initialize done (clearing initializing flag)');
+      setIsInitializing(false)
     }
   }
 
@@ -272,15 +298,15 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
           />
         </div>
 
-        <div className="flex justify-center gap-3 pt-4 mt-4">
+        <div className="modal-buttons flex justify-center gap-3 pt-4 mt-4">
           <Button
-            label={isInitializingDraft ? 'Initializing…' : "Let's Draft!"}
+            label={isInitializing ? 'Initializing…' : "Start Draft!"}
             onClick={onLetsDraft}
-            disabled={!isFormValid || isInitializingDraft || players.length === 0}
+            disabled={!isFormValid || isInitializing || players.length === 0}
             className="p-button-success"
             style={{ minWidth: '120px' }}
           />
-          {!isInitializingDraft && (
+          {!isInitializing && (
             <Button
               label="Cancel"
               onClick={handleDismiss}
@@ -291,6 +317,12 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
           )}
         </div>
       </div>
+      
+      <LoadingModal
+        visible={isInitializing}
+        title="Initializing draft…"
+        message="This may take up to a few minutes"
+      />
     </Dialog>
   )
 }

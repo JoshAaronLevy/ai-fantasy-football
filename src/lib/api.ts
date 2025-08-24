@@ -93,29 +93,40 @@ export async function initializeDraftBlocking(params: {
     players: Array<Record<string, any>>;
   };
 }): Promise<{ ok: true; conversationId: string | null; answer: string | null; raw?: any }> {
-  const res = await fetch('/api/draft/initialize', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(params),
-  });
+  console.debug('INIT DRAFT API: start');
   
-  if (!res.ok) {
-    throw new Error(`Initialize request failed: ${res.status}`);
+  try {
+    console.debug('INIT DRAFT API: POST /api/draft/initialize');
+    const res = await fetch('/api/draft/initialize', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+    });
+    
+    console.debug('INIT DRAFT API: response received', res.status);
+    
+    if (!res.ok) {
+      throw new Error(`Initialize request failed: ${res.status}`);
+    }
+    
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(`Initialize failed: ${data.error || 'Unknown error'}`);
+    }
+    
+    console.debug('INIT DRAFT API: success');
+    return {
+      ok: true,
+      conversationId: data.conversationId || null,
+      answer: data.answer || null,
+      raw: data
+    };
+  } catch (err) {
+    console.debug('INIT DRAFT API: error', err);
+    throw err;
   }
-  
-  const data = await res.json();
-  if (!data.ok) {
-    throw new Error(`Initialize failed: ${data.error || 'Unknown error'}`);
-  }
-  
-  return {
-    ok: true,
-    conversationId: data.conversationId || null,
-    answer: data.answer || null,
-    raw: data
-  };
 }
 
 // Blocking draft reset

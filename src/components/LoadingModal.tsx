@@ -2,9 +2,14 @@ import React from 'react'
 
 interface LoadingModalProps {
   visible: boolean
+  title?: string
+  message?: string
 }
 
-export const LoadingModal: React.FC<LoadingModalProps> = ({ visible }) => {
+export const LoadingModal: React.FC<LoadingModalProps> = ({
+  visible,
+  message
+}) => {
   if (!visible) return null
 
   return (
@@ -21,12 +26,11 @@ export const LoadingModal: React.FC<LoadingModalProps> = ({ visible }) => {
           <div className="h-12 w-12 rounded-full border-4 border-gray-300 dark:border-gray-600 border-t-blue-600 dark:border-t-blue-400 animate-spin" />
           
           <div className="text-center">
-            <h3
-              id="loading-title"
-              className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2"
-            >
-              Initializing draft, please wait
-            </h3>
+            {message && (
+              <p className="text-md">
+                {message}
+              </p>
+            )}
           </div>
         </div>
       </div>
