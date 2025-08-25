@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Calculate the total character count of a payload by converting it to JSON string
  * @param payload - The payload object to count characters for

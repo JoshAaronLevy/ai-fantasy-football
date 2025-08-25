@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { Player, ConversationMessage, StreamingState } from '../types'
+import type { Player, ConversationMessage } from '../types'
 
 type DraftAction = {
   id: string;
@@ -38,8 +38,6 @@ type DraftState = {
   isInitializingDraft: boolean;
   aiAnswer: string;
   
-  // Streaming state
-  streamingState: StreamingState;
 
   // Offline mode state
   isOfflineMode: boolean;
@@ -80,13 +78,6 @@ type DraftState = {
   clearAiAnswer: () => void;
   clearLocalState: () => void;
   
-  // Streaming actions
-  startStreaming: (messageId: string, transportMode: 'fetch' | 'sse') => void;
-  updateStreamingMessage: (messageId: string, content: string) => void;
-  completeStreaming: (messageId: string, finalContent?: string) => void;
-  errorStreaming: (messageId: string, error: string) => void;
-  stopStreaming: () => void;
-  createStreamingMessage: (type: ConversationMessage['type'], player?: Player, round?: number, pick?: number) => string;
 
   // Offline mode actions
   setOfflineMode: (isOffline: boolean) => void;
@@ -110,6 +101,8 @@ type DraftState = {
   canDraft: () => boolean;
   canTake: () => boolean;
   calculateMyNextPick: () => number | null;
+  userHasBackToBackPicks: () => boolean;
+  isNextPickMine: () => boolean;
 }
 
 export const useDraftStore = create<DraftState>()(
@@ -139,15 +132,6 @@ export const useDraftStore = create<DraftState>()(
       isInitializingDraft: false,
       aiAnswer: '',
       
-      // Streaming state
-      streamingState: {
-        isActive: false,
-        currentMessageId: undefined,
-        transportMode: undefined,
-        error: undefined,
-        startTime: undefined,
-        tokenCount: 0
-      },
 
       // Offline mode state
       isOfflineMode: false,
@@ -246,14 +230,6 @@ export const useDraftStore = create<DraftState>()(
         isApiLoading: false,
         isInitializingDraft: false,
         aiAnswer: '',
-        streamingState: {
-          isActive: false,
-          currentMessageId: undefined,
-          transportMode: undefined,
-          error: undefined,
-          startTime: undefined,
-          tokenCount: 0
-        },
         // Reset offline mode state so fresh draft attempts use online mode first
         isOfflineMode: false,
         showOfflineBanner: false,
@@ -498,119 +474,68 @@ export const useDraftStore = create<DraftState>()(
         
         return null;
       },
+
+      // Check if user has back-to-back picks (common at snake draft wrap points)
+      userHasBackToBackPicks: () => {
+        const state = get();
+        if (!state.draftConfig.teams || !state.draftConfig.pick) return false;
+        
+        const currentPick = state.actionHistory.length + 1;
+        const teams = state.draftConfig.teams;
+        const myPosition = state.draftConfig.pick;
+        
+        // Check if current pick is mine
+        const currentRound = Math.floor((currentPick - 1) / teams) + 1;
+        const currentPositionInRound = ((currentPick - 1) % teams) + 1;
+        
+        let currentExpectedPosition;
+        if (currentRound % 2 === 1) {
+          currentExpectedPosition = myPosition;
+        } else {
+          currentExpectedPosition = teams - myPosition + 1;
+        }
+        
+        const currentIsMyTurn = currentPositionInRound === currentExpectedPosition;
+        if (!currentIsMyTurn) return false;
+        
+        // Check if next pick is also mine
+        const nextPick = currentPick + 1;
+        const nextRound = Math.floor((nextPick - 1) / teams) + 1;
+        const nextPositionInRound = ((nextPick - 1) % teams) + 1;
+        
+        let nextExpectedPosition;
+        if (nextRound % 2 === 1) {
+          nextExpectedPosition = myPosition;
+        } else {
+          nextExpectedPosition = teams - myPosition + 1;
+        }
+        
+        return nextPositionInRound === nextExpectedPosition;
+      },
+
+      // Check if next pick after current state belongs to user
+      isNextPickMine: () => {
+        const state = get();
+        if (!state.draftConfig.teams || !state.draftConfig.pick) return false;
+        
+        const nextPick = state.actionHistory.length + 1;
+        const teams = state.draftConfig.teams;
+        const myPosition = state.draftConfig.pick;
+        
+        const round = Math.floor((nextPick - 1) / teams) + 1;
+        const positionInRound = ((nextPick - 1) % teams) + 1;
+        
+        let expectedPosition;
+        if (round % 2 === 1) {
+          expectedPosition = myPosition;
+        } else {
+          expectedPosition = teams - myPosition + 1;
+        }
+        
+        return positionInRound === expectedPosition;
+      },
       
       // Streaming actions
-      startStreaming: (messageId, transportMode) => set(() => ({
-        streamingState: {
-          isActive: true,
-          currentMessageId: messageId,
-          transportMode,
-          error: undefined,
-          startTime: Date.now(),
-          tokenCount: 0
-        }
-      })),
-      
-      updateStreamingMessage: (messageId, content) => set((s) => {
-        const messageIndex = s.conversationMessages.findIndex(m => m.id === messageId);
-        if (messageIndex === -1) return s;
-        
-        const updatedMessages = [...s.conversationMessages];
-        updatedMessages[messageIndex] = {
-          ...updatedMessages[messageIndex],
-          content,
-          isStreaming: true
-        };
-        
-        return {
-          conversationMessages: updatedMessages,
-          streamingState: {
-            ...s.streamingState,
-            tokenCount: content.length
-          }
-        };
-      }),
-      
-      completeStreaming: (messageId, finalContent) => set((s) => {
-        const messageIndex = s.conversationMessages.findIndex(m => m.id === messageId);
-        if (messageIndex === -1) return s;
-        
-        const updatedMessages = [...s.conversationMessages];
-        updatedMessages[messageIndex] = {
-          ...updatedMessages[messageIndex],
-          content: finalContent || updatedMessages[messageIndex].content,
-          isStreaming: false,
-          streamingError: undefined
-        };
-        
-        return {
-          conversationMessages: updatedMessages,
-          streamingState: {
-            isActive: false,
-            currentMessageId: undefined,
-            transportMode: undefined,
-            error: undefined,
-            startTime: undefined,
-            tokenCount: 0
-          }
-        };
-      }),
-      
-      errorStreaming: (messageId, error) => set((s) => {
-        const messageIndex = s.conversationMessages.findIndex(m => m.id === messageId);
-        if (messageIndex === -1) return s;
-        
-        const updatedMessages = [...s.conversationMessages];
-        updatedMessages[messageIndex] = {
-          ...updatedMessages[messageIndex],
-          isStreaming: false,
-          streamingError: error
-        };
-        
-        return {
-          conversationMessages: updatedMessages,
-          streamingState: {
-            isActive: false,
-            currentMessageId: undefined,
-            transportMode: undefined,
-            error,
-            startTime: undefined,
-            tokenCount: 0
-          }
-        };
-      }),
-      
-      stopStreaming: () => set(() => ({
-        streamingState: {
-          isActive: false,
-          currentMessageId: undefined,
-          transportMode: undefined,
-          error: undefined,
-          startTime: undefined,
-          tokenCount: 0
-        }
-      })),
-      
-      createStreamingMessage: (type, player, round, pick) => {
-        const messageId = `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        const message: ConversationMessage = {
-          id: messageId,
-          type,
-          content: '',
-          timestamp: Date.now(),
-          player,
-          round,
-          pick,
-          isStreaming: true,
-          streamingError: undefined
-        };
-        
-        set((s) => ({
-          conversationMessages: [...s.conversationMessages, message]
-        }));
-        
-        return messageId;
-      },
 
       // Offline mode actions
       setOfflineMode: (isOffline) => set({ isOfflineMode: isOffline }),

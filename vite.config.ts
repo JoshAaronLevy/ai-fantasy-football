@@ -11,6 +11,8 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
         ws: true,
+        timeout: 300_000,      // 5 min FE socket timeout
+        proxyTimeout: 300_000, // 5 min upstream socket timeout
       },
     },
   },

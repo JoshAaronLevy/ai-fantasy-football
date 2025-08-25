@@ -2,8 +2,8 @@
 import React from 'react'
 import { Toolbar } from 'primereact/toolbar'
 import { Button } from 'primereact/button'
-import { resetDraftBlocking } from '../lib/api'
-import { getUserId, clearConversationId } from '../lib/storage/localStore'
+import { resetBlocking, formatApiError } from '../lib/api'
+import { getUserId, clearConversationId, getConversationId } from '../lib/storage/localStore'
 import { useDraftStore } from '../state/draftStore'
 
 interface HeaderProps {
@@ -20,7 +20,19 @@ export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
     setError(null)
 
     try {
-      await resetDraftBlocking({ user: getUserId() })
+      const conversationId = getConversationId('draft');
+      const result = await resetBlocking({
+        user: getUserId(),
+        conversationId: conversationId || undefined
+      })
+      
+      // Check for server error response
+      if (result?.error) {
+        const errorMessage = formatApiError(result, 'Reset failed')
+        setError(errorMessage)
+        console.error('Reset failed:', errorMessage)
+        return
+      }
       
       // Clear localStorage conversation ID and state
       clearConversationId('draft')

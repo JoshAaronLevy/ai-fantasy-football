@@ -1,61 +1,80 @@
 import React from 'react'
-import MarkdownIt from 'markdown-it'
-import DOMPurify from 'dompurify'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeSanitize from 'rehype-sanitize'
 
 interface MarkdownRendererProps {
   content: string
   className?: string
 }
 
-// Configure markdown-it with safe settings
-const md = new MarkdownIt({
-  html: false,      // No raw HTML
-  linkify: true,    // Convert URLs to links
-  breaks: false     // No line breaks conversion
-})
-
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ 
-  content, 
-  className = '' 
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+  content,
+  className = ''
 }) => {
-  const sanitizedHtml = React.useMemo(() => {
-    // Render markdown to HTML
-    const rawHtml = md.render(content)
-    
-    // Only sanitize on the client
-    if (typeof window === 'undefined') {
-      return rawHtml
-    }
-    
-    // Sanitize with DOMPurify - only allow minimal tags
-    const cleanHtml = DOMPurify.sanitize(rawHtml, {
-      ALLOWED_TAGS: ['p', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'a'],
-      ALLOWED_ATTR: ['href', 'target', 'rel'],
-      ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-      ALLOW_DATA_ATTR: false,
-      ALLOW_UNKNOWN_PROTOCOLS: false,
-      // Hook to ensure proper rel attributes on external links
-      HOOK_AFTER_SANITIZE: (fragment) => {
-        const links = fragment.querySelectorAll('a[target="_blank"]')
-        links.forEach((link) => {
-          const rel = link.getAttribute('rel') || ''
-          const relTokens = new Set(rel.split(/\s+/).filter(Boolean))
-          relTokens.add('noopener')
-          relTokens.add('noreferrer')
-          link.setAttribute('rel', Array.from(relTokens).join(' '))
-        })
-      }
-    })
-    
-    return cleanHtml
-  }, [content])
-
-  const combinedClassName = `prose whitespace-pre-wrap ${className}`.trim()
+  const combinedClassName = `prose prose-sm max-w-none ${className}`.trim()
 
   return (
-    <div 
-      className={combinedClassName}
-      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-    />
+    <div className="overflow-x-auto">
+      <div className={combinedClassName}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[
+            [rehypeSanitize, {
+              tagNames: ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'code', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
+              attributes: {
+                a: ['href', 'target', 'rel'],
+                '*': ['className']
+              },
+              protocols: {
+                href: ['http', 'https', 'mailto', 'tel']
+              }
+            }]
+          ]}
+          components={{
+            table: ({ children, ...props }) => (
+              <div className="overflow-x-auto my-4">
+                <table className="min-w-full text-sm border-collapse border border-gray-300" {...props}>
+                  {children}
+                </table>
+              </div>
+            ),
+            thead: ({ children, ...props }) => (
+              <thead className="bg-gray-50" {...props}>
+                {children}
+              </thead>
+            ),
+            th: ({ children, ...props }) => (
+              <th className="border border-gray-300 px-3 py-2 text-left font-semibold text-gray-900" {...props}>
+                {children}
+              </th>
+            ),
+            td: ({ children, ...props }) => (
+              <td className="border border-gray-300 px-3 py-2 text-gray-700" {...props}>
+                {children}
+              </td>
+            ),
+            tr: ({ children, ...props }) => (
+              <tr className="even:bg-gray-50" {...props}>
+                {children}
+              </tr>
+            ),
+            a: ({ children, href, ...props }) => (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:text-blue-800 underline"
+                {...props}
+              >
+                {children}
+              </a>
+            )
+          }}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+    </div>
   )
 }

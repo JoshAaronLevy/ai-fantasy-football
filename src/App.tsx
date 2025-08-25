@@ -27,33 +27,31 @@ export default function App() {
   React.useEffect(() => {
     const loadPlayers = async () => {
       // Only fetch if we don't already have players loaded
-      if (players.length === 0) {
-        try {
-          setPlayersLoading(true)
-          setPlayersError(null)
-          const playersData = await fetchPlayers()
-          setPlayers(playersData)
-          // If successful, ensure we're not in offline mode
-          setOfflineMode(false)
-          setShowOfflineBanner(false)
-        } catch (error) {
-          console.error('Failed to fetch players:', error)
-          setPlayersError(error instanceof Error ? error.message : 'Failed to fetch players')
-          
-          // Enter offline mode
-          setOfflineMode(true)
-          setShowOfflineBanner(true)
-          
-          // Show error toast
-          toast.current?.show({
-            severity: 'error',
-            summary: 'Unable to fetch players',
-            detail: 'Network connection failed. The app will work in offline mode with limited functionality.',
-            life: 5000
-          })
-        } finally {
-          setPlayersLoading(false)
-        }
+      try {
+        setPlayersLoading(true)
+        setPlayersError(null)
+        const playersData = await fetchPlayers()
+        setPlayers(playersData)
+        // If successful, ensure we're not in offline mode
+        setOfflineMode(false)
+        setShowOfflineBanner(false)
+      } catch (error) {
+        console.error('Failed to fetch players:', error)
+        setPlayersError(error instanceof Error ? error.message : 'Failed to fetch players')
+        
+        // Enter offline mode
+        setOfflineMode(true)
+        setShowOfflineBanner(true)
+        
+        // Show error toast
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Unable to fetch players',
+          detail: 'Network connection failed. The app will work in offline mode with limited functionality.',
+          life: 5000
+        })
+      } finally {
+        setPlayersLoading(false)
       }
     }
 

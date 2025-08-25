@@ -24,6 +24,9 @@
     "primereact": "^10.9.7",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
     "uuid": "^11.1.0",
     "zustand": "^5.0.8"
   },

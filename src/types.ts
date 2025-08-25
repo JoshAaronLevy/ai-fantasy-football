@@ -28,14 +28,13 @@ export interface Player {
 // AI Conversation types
 export interface ConversationMessage {
   id: string;
-  type: 'strategy' | 'player-taken' | 'user-turn' | 'loading' | 'streaming';
+  type: 'strategy' | 'player-taken' | 'user-turn' | 'loading' | 'analysis';
   content: string;
   timestamp: number;
   player?: Player; // Associated player for player-taken and user-turn messages
-  round?: number; // For user-turn messages
-  pick?: number; // For user-turn messages
-  isStreaming?: boolean; // True while content is still being streamed
-  streamingError?: string; // Error message if streaming failed
+  round?: number; // For user-turn and analysis messages
+  pick?: number; // For user-turn and analysis messages
+  meta?: { round: number; pick: number }; // For analysis messages
 }
 
 export interface AIConversationState {
@@ -44,36 +43,3 @@ export interface AIConversationState {
   lastUpdated: number;
 }
 
-// Streaming-related types
-export interface StreamingState {
-  isActive: boolean;
-  currentMessageId?: string;
-  transportMode?: 'fetch' | 'sse';
-  error?: string;
-  startTime?: number;
-  tokenCount?: number;
-}
-
-// LLM streaming request types
-export interface LlmStreamingRequest {
-  action: 'user-turn' | 'player-taken' | 'strategy' | 'analysis';
-  conversationId?: string;
-  payload: {
-    player?: Player;
-    round?: number;
-    pick?: number;
-    userRoster?: Record<string, true>;
-    availablePlayers?: Player[];
-    draftConfig?: {
-      teams: number;
-      pick: number;
-    };
-  };
-}
-
-// UI streaming controls
-export interface StreamingControls {
-  start: (request: LlmStreamingRequest) => Promise<void>;
-  stop: () => void;
-  retry: () => Promise<void>;
-}

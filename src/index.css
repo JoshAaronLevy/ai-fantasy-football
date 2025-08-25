@@ -480,3 +480,163 @@ body {
   display: flex !important;
   justify-content: center !important;
 }
+
+/* Markdown Renderer Styles */
+.prose {
+  color: #374151;
+  max-width: 65ch;
+}
+
+.prose-sm {
+  font-size: 0.875rem;
+  line-height: 1.7142857;
+}
+
+.prose-sm p {
+  margin-top: 1.1428571em;
+  margin-bottom: 1.1428571em;
+}
+
+.prose-sm h1 {
+  font-size: 2.1428571em;
+  margin-top: 0;
+  margin-bottom: 0.8em;
+  line-height: 1.2;
+}
+
+.prose-sm h2 {
+  font-size: 1.4285714em;
+  margin-top: 1.6em;
+  margin-bottom: 0.8em;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+.prose-sm h3 {
+  font-size: 1.2857143em;
+  margin-top: 1.5555556em;
+  margin-bottom: 0.4444444em;
+  line-height: 1.5555556;
+  font-weight: 600;
+}
+
+.prose-sm h4 {
+  margin-top: 1.4285714em;
+  margin-bottom: 0.5714286em;
+  line-height: 1.4285714;
+  font-weight: 600;
+}
+
+.prose-sm strong {
+  font-weight: 600;
+}
+
+.prose-sm em {
+  font-style: italic;
+}
+
+.prose-sm ul {
+  margin-top: 1.1428571em;
+  margin-bottom: 1.1428571em;
+  padding-left: 1.6em;
+}
+
+.prose-sm ol {
+  margin-top: 1.1428571em;
+  margin-bottom: 1.1428571em;
+  padding-left: 1.6em;
+}
+
+.prose-sm li {
+  margin-top: 0.2857143em;
+  margin-bottom: 0.2857143em;
+}
+
+.prose-sm a {
+  color: #3b82f6;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.prose-sm a:hover {
+  color: #1d4ed8;
+}
+
+.max-w-none {
+  max-width: none;
+}
+
+.overflow-x-auto {
+  overflow-x: auto;
+}
+
+.my-4 {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.min-w-full {
+  min-width: 100%;
+}
+
+.border-collapse {
+  border-collapse: collapse;
+}
+
+.border {
+  border-width: 1px;
+}
+
+.border-gray-300 {
+  border-color: #d1d5db;
+}
+
+.bg-gray-50 {
+  background-color: #f9fafb;
+}
+
+.px-3 {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.text-gray-900 {
+  color: #111827;
+}
+
+.text-gray-700 {
+  color: #374151;
+}
+
+.even\:bg-gray-50:nth-child(even) {
+  background-color: #f9fafb;
+}
+
+.text-blue-600 {
+  color: #2563eb;
+}
+
+.text-blue-800 {
+  color: #1e40af;
+}
+
+.hover\:text-blue-800:hover {
+  color: #1e40af;
+}
+
+.underline {
+  text-decoration: underline;
+}

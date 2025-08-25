@@ -6,10 +6,9 @@ import { Button } from 'primereact/button'
 import { Message } from 'primereact/message'
 import { Toast } from 'primereact/toast'
 import { useDraftStore } from '../state/draftStore'
-import { useLlmStream } from '../hooks/useLlmStream'
 import { getUserId, getConversationId, setConversationId } from '../lib/storage/localStore'
-import { initializeDraftBlocking } from '../lib/api'
-import { pickTopPlayersForInit } from '../lib/players/pickTop'
+import { marcoPingBlocking, initializeDraftBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
+import { mapToSlimTopN } from '../lib/players/slim'
 import { LoadingModal } from './LoadingModal'
 
 interface DraftConfigModalProps {
@@ -38,9 +37,22 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
   const [error, setError] = React.useState<string | null>(null)
   const [isInitializing, setIsInitializing] = React.useState(false)
-  
-  // Streaming hook for initialize (keeping for other actions)
-  const [{ tokens, error: streamError, isStreaming, conversationId, lastEvent }, { start: startStream, abort: abortStream, clear: clearStream }] = useLlmStream()
+
+  // StrictMode guard to prevent double-fire of Marco ping
+  const marcoPingFiredRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (marcoPingFiredRef.current) return;
+    marcoPingFiredRef.current = true;
+
+    (async () => {
+      try {
+        const { answer, upstreamStatus, duration_ms } = await marcoPingBlocking();
+      } catch (e) {
+        console.error('[MARCO ERROR]', e);
+      }
+    })();
+  }, []);
 
   // Reset form when modal opens with current config
   React.useEffect(() => {
@@ -75,7 +87,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const isFormValid = selectedTeams !== null && selectedPick !== null
 
   const onLetsDraft = async () => {
-    console.debug('INIT DRAFT: click handler invoked');
+    console.log('player[0]: ', players[0]);
 
     // Early return guard for duplicate clicks
     if (isInitializing) {
@@ -90,6 +102,29 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     // Validate players dataset
     if (players.length === 0) {
       setError('No players available. Please ensure player data is loaded.');
+      return;
+    }
+
+    // Validate user ID generation before proceeding
+    try {
+      const userId = getUserId();
+      if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Session Error',
+          detail: 'Failed to create user id. Please refresh the page.',
+          life: 5000
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to generate user ID:', error);
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Session Error',
+        detail: 'Failed to create user id. Please refresh the page.',
+        life: 5000
+      });
       return;
     }
 
@@ -115,44 +150,59 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     }
 
     try {
-      // Build body for blocking API call with slimmed payload
+      // Build top players (slimmedRoster) as an array of slim players limited to 12
       const availablePlayers = players
         .filter(player => !isDrafted(player.id) && !isTaken(player.id))
 
-      const slimmedPlayers = pickTopPlayersForInit(availablePlayers, 25)
-      
-      const body = {
-        user: getUserId(),
-        conversationId: getConversationId('draft') || null,
-        payload: {
-          numTeams: selectedTeams,
-          userPickPosition: selectedPick,
-          players: slimmedPlayers
-        }
+      // OLD: const top25Slim = mapToSlimTopN(availablePlayers, 25)
+      const slimmedRoster = mapToSlimTopN(availablePlayers, 6)
+
+      // Construct the request payload without conversationId
+      const payload = {
+        numTeams: selectedTeams,
+        userPickPosition: selectedPick,
+        players: slimmedRoster
       }
 
       // Log payload size in dev mode
       if (import.meta.env.DEV) {
-        const bytes = new TextEncoder().encode(JSON.stringify(body)).length
+        const bytes = new TextEncoder().encode(JSON.stringify(payload)).length
         console.log('[INIT payload bytes]', bytes)
       }
 
       console.debug('INIT DRAFT: calling initialize API');
-      const data = await initializeDraftBlocking(body)
+      const data = await initializeDraftBlocking(payload)
       console.debug('INIT DRAFT: initialize API success');
 
-      // If data.conversationId: setConversationId('draft', data.conversationId)
+      // Check for server error response
+      if (data?.error) {
+        const errorDetail = formatApiError(data, 'Draft initialization failed')
+        
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Draft Initialization Failed',
+          detail: errorDetail,
+          life: 5000
+        })
+        
+        return
+      }
+
+      // Store conversationId in localStorage if present
       if (data.conversationId) {
         setConversationId('draft', data.conversationId)
       }
 
-      // Set AI answer in store
-      setAiAnswer(data.answer ?? '')
+      // Get normalized content from response
+      const strategyContent = getTextFromLlmResponse(data)
+
+      // Push initial strategy message to the UI
+      setAiAnswer(strategyContent)
 
       // Initialize draft state
       initializeDraftState(
         data.conversationId || '',
-        data.answer || 'Draft strategy initialized.',
+        strategyContent || 'Draft strategy initialized.',
         config
       )
 
@@ -234,31 +284,12 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
           />
         )}
         
-        {streamError && (
-          <Message
-            severity="error"
-            text={`Stream error: ${streamError}`}
-            className="w-full"
-          />
-        )}
-        
         {players.length === 0 && (
           <Message
             severity="warn"
             text="Add at least one player to begin."
             className="w-full"
           />
-        )}
-        
-        {lastEvent?.type === 'phase' && (
-          <div className="text-gray-500 text-xs">Phase: {lastEvent.step} {lastEvent.status ? `(status ${lastEvent.status})` : ''}</div>
-        )}
-        
-        {tokens && isStreaming && (
-          <div className="mt-4 p-3 bg-gray-100 rounded border">
-            <div className="text-sm font-medium mb-2">AI Strategy (streaming):</div>
-            <pre className="text-xs whitespace-pre-wrap max-h-32 overflow-y-auto">{tokens}</pre>
-          </div>
         )}
         
         <div>

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import React from 'react'
+import React, { useState } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import 'ag-grid-community/styles/ag-grid.css'
@@ -14,8 +14,9 @@ import type { Player } from '../types'
 import { useDraftStore } from '../state/draftStore'
 import { DraftConfigModal } from './DraftConfigModal'
 import { Star, StarOff, TrendingUp, TrendingDown, Minus } from 'lucide-react'
-import { playerTaken, userTurn } from '../lib/api'
-import { useLlmStream } from '../hooks/useLlmStream'
+import { playerTakenBlocking, playerDraftedBlocking, userTurnBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
+import { toMinimalPickFromAny, mapToSlimTopN } from '../lib/players/slim'
+import { getConversationId, getUserId } from '../lib/storage/localStore'
 
 const StarCell: React.FC<ICellRendererParams<Player>> = (params) => {
   const data = params.data
@@ -51,8 +52,13 @@ const StarCell: React.FC<ICellRendererParams<Player>> = (params) => {
   )
 }
 
-const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.RefObject<Toast | null> }> = (params) => {
-  const { data, toast } = params
+const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
+  toast: React.RefObject<Toast | null>;
+  onUserTurnTrigger?: () => void;
+}> = (params) => {
+  const { data, toast, onUserTurnTrigger } = params
+  const [isTaking, setIsTaking] = useState(false)
+  const [isDrafting, setIsDrafting] = useState(false)
   const draftPlayer = useDraftStore((s) => s.draftPlayer)
   const takePlayer = useDraftStore((s) => s.takePlayer)
   const isDrafted = useDraftStore((s) => s.isDrafted)
@@ -61,21 +67,19 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.R
   const canTake = useDraftStore((s) => s.canTake)
   const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
   const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
+  const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
   const conversationId = useDraftStore((s) => s.conversationId)
   const markPlayerTaken = useDraftStore((s) => s.markPlayerTaken)
-  const markUserTurn = useDraftStore((s) => s.markUserTurn)
-  const getPicksUntilMyTurn = useDraftStore((s) => s.getPicksUntilMyTurn)
-  const players = useDraftStore((s) => s.players)
-  const myTeam = useDraftStore((s) => s.myTeam)
-  const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
+  const isMyTurn = useDraftStore((s) => s.isMyTurn)
   const isOfflineMode = useDraftStore((s) => s.isOfflineMode)
   const setOfflineMode = useDraftStore((s) => s.setOfflineMode)
   const setShowOfflineBanner = useDraftStore((s) => s.setShowOfflineBanner)
-  const addPendingApiCall = useDraftStore((s) => s.addPendingApiCall)
   const draftConfig = useDraftStore((s) => s.draftConfig)
-  
-  // Streaming integration
-  const [{ tokens, isStreaming, error, conversationId: streamConvId }, { start, abort, clear }] = useLlmStream()
+
+  // Task 5: User turn edge guard - calls the trigger function passed from parent
+  const tryTriggerUserTurnEdgeGuarded = () => {
+    onUserTurnTrigger?.();
+  };
   
   if (!data) return null
 
@@ -119,16 +123,16 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.R
           tooltipOptions={{ position: 'top' }}
         />
         <Button
-          label='Taken'
+          label={isTaking ? 'Acknowledging…' : 'Taken'}
           onClick={handleTakeClick}
-          disabled={unavailable}
-          className={unavailable ? 'p-button-secondary' : 'p-button-danger'}
+          disabled={unavailable || isTaking}
+          className={unavailable || isTaking ? 'p-button-secondary' : 'p-button-danger'}
           size="small"
           style={{
             fontSize: '0.75rem',
             padding: '0.25rem 0.5rem'
           }}
-          tooltip={unavailable ? 'Unavailable' : 'Mark as taken'}
+          tooltip={unavailable ? 'Unavailable' : isTaking ? 'Processing...' : 'Mark as taken'}
           tooltipOptions={{ position: 'top' }}
         />
       </div>
@@ -140,186 +144,142 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.R
   const canTakeThisPlayer = canTake() && !unavailable
 
   const handleDraftClick = async () => {
-    if (!canDraftThisPlayer || !data) return;
+    if (!canDraftThisPlayer || !data || isDrafting) return;
     
-    const currentPick = getCurrentPick();
-    const currentRound = getCurrentRound();
-    
-    // First, draft the player locally
-    draftPlayer(data.id);
-    
-    // Show immediate success toast
-    toast.current?.show({
-      severity: 'success',
-      summary: `Pick ${currentPick}: ${data.position} - ${data.name} - ${data.team?.abbr || 'N/A'}`,
-      life: 3000,
-      className: 'center-toast'
-    });
-    
-    // Skip streaming if offline or not configured
-    if (isOfflineMode || !isDraftConfigured() || !conversationId || !draftConfig.teams || !draftConfig.pick) {
-      return;
-    }
+    setIsDrafting(true);
     
     try {
-      // Build user roster (current team)
-      const userRoster = players.filter(p => myTeam[p.id]);
+      const round = getCurrentRound();
+      const pick = getCurrentPick();
       
-      // Get available players (top 200 for efficiency)
-      const availablePlayers = players
-        .filter(p => !isDrafted(p.id) && !isTaken(p.id) && p.id !== data.id)
-        .slice(0, 200);
+      // Build minimal player payload
+      const minimal = toMinimalPickFromAny(data);
       
-      // Validate required fields
-      if (userRoster.length === 0 || availablePlayers.length === 0) {
-        console.warn('Skipping streaming: insufficient roster or available players');
-        return;
-      }
-      
-      // Start streaming analysis
-      await start({
-        scope: 'draft',
-        action: 'user-turn',
+      // BLOCKING: Send drafted ACK first before updating local state
+      const conversationId = getConversationId('draft');
+      const result = await playerDraftedBlocking({
+        user: getUserId(),
+        conversationId: conversationId || '',
         payload: {
-          player: data,
-          round: currentRound,
-          pick: currentPick,
-          userRoster: userRoster,
-          availablePlayers: availablePlayers
+          round,
+          pick,
+          player: minimal
         }
       });
       
-      // Show streaming toast
+      // Check for error in response
+      if (result?.error) {
+        const errorDetail = formatApiError(result, 'Draft failed')
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Draft Failed',
+          detail: errorDetail,
+          life: 4000
+        });
+        return;
+      }
+      
+      // On success: update roster locally
+      draftPlayer(data.id);
+      
+      // Show ACK message if returned (DRAFTED:...)
+      const ack = getTextFromLlmResponse(result) || result?.message || result?.data?.message || '';
+      if (ack && ack.startsWith('DRAFTED:')) {
+        toast.current?.show({
+          severity: 'success',
+          summary: ack,
+          life: 3000
+        });
+      }
+      
+    } catch (error) {
+      console.error('Draft API error:', error);
       toast.current?.show({
-        severity: 'info',
-        summary: 'AI Analysis Started',
-        detail: 'Generating draft recommendations...',
-        life: 2000
+        severity: 'error',
+        summary: 'API Error',
+        detail: error instanceof Error ? error.message : 'Unknown error',
+        life: 4000
       });
-      
-    } catch (streamError) {
-      console.error('Streaming failed:', streamError);
-      
-      // Fall back to offline mode
-      setOfflineMode(true);
-      setShowOfflineBanner(true);
-      
-      toast.current?.show({
-        severity: 'warn',
-        summary: 'AI Analysis Unavailable',
-        detail: 'Draft recorded. AI analysis failed.',
-        life: 3000
-      });
+    } finally {
+      setIsDrafting(false);
     }
   }
 
   const handleTakeClick = async () => {
-    if (!canTakeThisPlayer || !data) return;
+    if (isTaking || !canTakeThisPlayer || !data) return;
     
-    const currentPick = getCurrentPick();
-    const currentRound = getCurrentRound();
+    setIsTaking(true);
     
-    // ALWAYS update local state immediately (non-blocking)
-    takePlayer(data.id);
-    
-    // Show immediate toast for taken player
-    toast.current?.show({
-      severity: 'error',
-      summary: `Pick ${currentPick}: ${data.position} - ${data.name} - ${data.team?.abbr || 'N/A'}`,
-      life: 2000,
-      className: 'center-toast'
-    });
-    
-    // Skip API call if already in offline mode or no conversation
-    if (isOfflineMode || !isDraftConfigured() || !conversationId) {
-      return;
-    }
-    
-    // Make API call in background (non-blocking)
     try {
-      // Check if it's about to be the user's turn (after this pick)
-      const picksUntilMyTurn = getPicksUntilMyTurn();
-      const isUserTurnNext = picksUntilMyTurn === 1;
+      const round = getCurrentRound();
+      const pick = getCurrentPick();
       
-      if (isUserTurnNext) {
-        // Get user's current roster (players with drafted: true)
-        const userRoster = players.filter(p => myTeam[p.id]);
-        
-        // Get top 25 available players (not drafted or taken)
-        const availablePlayers = players
-          .filter(p => !isDrafted(p.id) && !isTaken(p.id) && p.id !== data.id)
-          .slice(0, 25);
-        
-        // Call userTurn API
-        const response = await userTurn({
-          player: data,
-          round: currentRound,
-          pick: currentPick,
-          userRoster: userRoster,
-          availablePlayers: availablePlayers,
-          conversationId: conversationId
-        });
-        
-        // Update with AI analysis (this will update the conversation)
-        markUserTurn(data.id, data, response.analysis, currentRound, currentPick, response.conversationId);
-        
-        // Show additional toast for AI analysis
+      // Build minimal player payload
+      const minimal = toMinimalPickFromAny(data);
+      
+      // Get conversationId and userId
+      const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
+      const userId = getUserId() || 'user';
+      
+      if (!activeConversationId) {
         toast.current?.show({
-          severity: 'info',
-          summary: 'AI Analysis Updated',
-          detail: 'Your turn is next! Check the AI drawer for recommendations.',
+          severity: 'error',
+          summary: 'Draft Not Initialized',
+          detail: 'Initialize the draft first',
+          life: 3000
+        });
+        return;
+      }
+      
+      // BLOCKING: Send taken ACK
+      const result = await playerTakenBlocking({
+        user: userId,
+        conversationId: activeConversationId,
+        payload: { round, pick, player: minimal }
+      });
+      
+      // Check for error in response
+      if (result?.error) {
+        const errorDetail = formatApiError(result, 'Mark as taken failed')
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Mark as Taken Failed',
+          detail: errorDetail,
           life: 4000
         });
-      } else {
-        // Regular player taken API call
-        const response = await playerTaken({
-          player: data,
-          conversationId: conversationId
+        return;
+      }
+      
+      // On success: update store to mark player as taken
+      const ack = getTextFromLlmResponse(result) || result?.message || result?.data?.message || '';
+      markPlayerTaken(data.id, data, ack || 'Player taken recorded', activeConversationId);
+      
+      // Show ACK message (TAKEN:...)
+      if (ack && ack.startsWith('TAKEN:')) {
+        toast.current?.show({
+          severity: 'info',
+          summary: ack,
+          life: 3000
         });
-        
-        // Update with AI confirmation (this will update the conversation)
-        markPlayerTaken(data.id, data, response.confirmation, response.conversationId);
+      }
+      
+      // After success, re-evaluate isMyTurn and trigger Task 5 if needed
+      if (isMyTurn()) {
+        tryTriggerUserTurnEdgeGuarded?.();
       }
       
     } catch (error) {
-      console.error('Failed to call API:', error);
-      
-      // Enter offline mode for future calls
-      setOfflineMode(true);
-      setShowOfflineBanner(true);
-      
-      // Store the failed API call for potential retry
-      const apiPayload = {
-        player: data,
-        conversationId: conversationId,
-        ...(getPicksUntilMyTurn() === 1 ? {
-          round: currentRound,
-          pick: currentPick,
-          userRoster: players.filter(p => myTeam[p.id]),
-          availablePlayers: players.filter(p => !isDrafted(p.id) && !isTaken(p.id) && p.id !== data.id).slice(0, 25)
-        } : {})
-      };
-      
-      addPendingApiCall(
-        getPicksUntilMyTurn() === 1 ? 'userTurn' : 'playerTaken',
-        apiPayload
-      );
-      
-      // Show offline mode toast
+      console.error('Take API error:', error);
       toast.current?.show({
-        severity: 'warn',
-        summary: 'API Connection Lost',
-        detail: 'Player marked locally. AI analysis unavailable until connection restored.',
+        severity: 'error',
+        summary: 'API Error',
+        detail: error instanceof Error ? error.message : 'Unknown error',
         life: 4000
       });
+    } finally {
+      setIsTaking(false);
     }
   }
-
-  // Check validation for streaming
-  const userRoster = players.filter(p => myTeam[p.id]);
-  const availablePlayers = players.filter(p => !isDrafted(p.id) && !isTaken(p.id));
-  const hasValidPayload = userRoster.length > 0 && availablePlayers.length > 0 &&
-                         draftConfig.teams && draftConfig.pick && conversationId;
 
   return (
     <div style={{
@@ -330,10 +290,10 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.R
       justifyContent: 'center'
     }}>
       <Button
-        label={drafted ? 'Drafted' : isStreaming ? 'Streaming...' : 'Draft'}
+        label={drafted ? 'Drafted' : isDrafting ? 'Drafting…' : 'Draft'}
         onClick={handleDraftClick}
-        disabled={!canDraftThisPlayer || isStreaming}
-        className={!canDraftThisPlayer || isStreaming ? 'p-button-secondary' : 'p-button-success'}
+        disabled={!canDraftThisPlayer || isDrafting || isTaking}
+        className={!canDraftThisPlayer || isDrafting || isTaking ? 'p-button-secondary' : 'p-button-success'}
         size="small"
         style={{
           fontSize: '0.75rem',
@@ -342,34 +302,18 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.R
         tooltip={
           unavailable ? 'Unavailable' :
           !canDraft() ? 'Not your turn' :
-          isStreaming ? 'AI analysis in progress...' :
-          !hasValidPayload ? 'Missing roster or config for AI analysis' :
+          isDrafting ? 'Processing draft...' :
+          isTaking ? 'Taking player...' :
           'Add to my team'
         }
         tooltipOptions={{ position: 'top' }}
       />
       
-      {/* Stop button when streaming */}
-      {isStreaming && (
-        <Button
-          icon="pi pi-stop"
-          onClick={abort}
-          className="p-button-danger"
-          size="small"
-          style={{
-            fontSize: '0.75rem',
-            padding: '0.25rem 0.5rem'
-          }}
-          tooltip="Stop AI analysis"
-          tooltipOptions={{ position: 'top' }}
-        />
-      )}
-      
       <Button
-        label='Taken'
+        label={isTaking ? 'Acknowledging…' : 'Taken'}
         onClick={handleTakeClick}
-        disabled={!canTakeThisPlayer}
-        className={!canTakeThisPlayer ? 'p-button-secondary' : 'p-button-danger'}
+        disabled={!canTakeThisPlayer || isTaking || isDrafting}
+        className={!canTakeThisPlayer || isTaking || isDrafting ? 'p-button-secondary' : 'p-button-danger'}
         size="small"
         style={{
           fontSize: '0.75rem',
@@ -378,6 +322,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & { toast: React.R
         tooltip={
           unavailable ? 'Unavailable' :
           !canTake() ? 'Your turn to draft' :
+          isTaking ? 'Processing...' :
+          isDrafting ? 'Drafting player...' :
           'Mark as taken'
         }
         tooltipOptions={{ position: 'top' }}
@@ -532,13 +478,144 @@ export const PlayersGrid: React.FC = () => {
   const [hidingPlayerIds, setHidingPlayerIds] = React.useState<Set<string>>(new Set())
 
   const toast = React.useRef<Toast>(null)
+  const lastTurnKeyRef = React.useRef<string | null>(null) // Guard against wheel double-calls
   const draftConfig = useDraftStore((s) => s.draftConfig)
   const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
   const hideDraftedPlayers = useDraftStore((s) => s.hideDraftedPlayers)
   const toggleHideDraftedPlayers = useDraftStore((s) => s.toggleHideDraftedPlayers)
   
-  // Streaming hook for reset conversation functionality
-  const [, { clear }] = useLlmStream()
+  // Additional selectors for user-turn payload
+  const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
+  const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
+  const myTeam = useDraftStore((s) => s.myTeam)
+  const players = useDraftStore((s) => s.players)
+  const draftPlayer = useDraftStore((s) => s.draftPlayer)
+  const markPlayerTaken = useDraftStore((s) => s.markPlayerTaken)
+  const canDraft = useDraftStore((s) => s.canDraft)
+  const canTake = useDraftStore((s) => s.canTake)
+  const addConversationMessage = useDraftStore((s) => s.addConversationMessage)
+  const conversationId = useDraftStore((s) => s.conversationId)
+  const isOfflineMode = useDraftStore((s) => s.isOfflineMode)
+  const setOfflineMode = useDraftStore((s) => s.setOfflineMode)
+  const setShowOfflineBanner = useDraftStore((s) => s.setShowOfflineBanner)
+  const [isTaking, setIsTaking] = React.useState(false)
+  
+
+  // Task 5: User turn trigger with wheel guard
+  const tryTriggerUserTurnEdgeGuarded = async () => {
+    const round = getCurrentRound();
+    const pick = getCurrentPick();
+    const turnKey = `${round}:${pick}`;
+    
+    // Wheel guard: skip if same turn key
+    if (turnKey === lastTurnKeyRef.current) {
+      console.debug('User-turn analysis already triggered for', turnKey);
+      return;
+    }
+    
+    const activeConversationId = conversationId || getConversationId('draft');
+    
+    // Guard: conversationId must exist
+    if (!activeConversationId) {
+      console.debug('No conversationId, skipping user-turn analysis');
+      return;
+    }
+    
+    // Guard: must be configured
+    if (!isDraftConfigured()) {
+      console.debug('Draft not configured, skipping user-turn analysis');
+      return;
+    }
+    
+    const userId = getUserId() || 'user';
+    const numTeams = draftConfig.teams || 6;
+    const slot = draftConfig.pick || 1;
+    
+    try {
+      // Show loading indicator
+      toast.current?.show({
+        severity: 'info',
+        summary: 'Getting recommendations...',
+        detail: 'AI is analyzing your turn',
+        life: 0 // Keep until response
+      });
+      
+      // Build current roster as slim players
+      const slimRoster = players
+        .filter(p => myTeam[p.id])
+        .map(p => toMinimalPickFromAny(p));
+      
+      // Get available players (top 25) using mapToSlimTopN
+      const availablePlayers = players.filter(p => !isDrafted(p.id) && !isTaken(p.id));
+      const availablePlayers25 = mapToSlimTopN(availablePlayers, 25);
+      
+      console.debug('Triggering user-turn analysis for', turnKey);
+      
+      const result = await userTurnBlocking({
+        user: userId,
+        conversationId: activeConversationId,
+        payload: {
+          round,
+          pick,
+          roster: slimRoster,
+          availablePlayers: availablePlayers25,
+          numTeams,
+          slot
+        }
+      });
+      
+      // Clear loading toast
+      toast.current?.clear();
+      
+      // Check for error in response
+      if (result?.error) {
+        const errorDetail = formatApiError(result, 'Analysis failed')
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Analysis Failed',
+          detail: errorDetail,
+          life: 4000
+        });
+        return;
+      }
+      
+      // Normalize text via getTextFromLlmResponse
+      const text = getTextFromLlmResponse(result);
+      
+      // Push a message as 'analysis' type with meta
+      addConversationMessage({
+        id: `user-turn-analysis-${Date.now()}`,
+        type: 'analysis',
+        content: text,
+        timestamp: Date.now(),
+        meta: { round, pick }
+      });
+      
+      // Update wheel guard on success
+      lastTurnKeyRef.current = turnKey;
+      
+      toast.current?.show({
+        severity: 'success',
+        summary: 'Recommendations ready',
+        detail: 'Check the analysis drawer for insights',
+        life: 3000
+      });
+      
+    } catch (error) {
+      console.error('User-turn analysis failed:', error);
+      
+      // Clear loading toast
+      toast.current?.clear();
+      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Analysis failed',
+        detail: errorMessage,
+        life: 4000
+      });
+    }
+  };
 
   // Handle round change animation
   React.useEffect(() => {
@@ -550,7 +627,7 @@ export const PlayersGrid: React.FC = () => {
     }
   }, [currentRound, prevRound])
 
-  // Monitor turn changes for toast notifications
+  // Task 5: Turn detection effect with edge transition monitoring
   React.useEffect(() => {
     if (!isDraftConfigured()) return
 
@@ -567,8 +644,8 @@ export const PlayersGrid: React.FC = () => {
       })
     }
 
-    // Show "It's your turn" toast when it becomes my turn
-    if (currentIsMyTurn && !prevIsMyTurn) {
+    // Detect edge transition: prevIsMyTurn === false && currentIsMyTurn === true
+    if (prevIsMyTurn === false && currentIsMyTurn === true) {
       // Clear any existing "up next" toast
       toast.current?.clear()
       
@@ -578,6 +655,9 @@ export const PlayersGrid: React.FC = () => {
         life: 0, // Keep until I draft
         className: 'top-right-toast'
       })
+      
+      // Trigger user-turn analysis with wheel guard
+      tryTriggerUserTurnEdgeGuarded();
     }
 
     // Clear turn toasts when I've drafted (no longer my turn after drafting)
@@ -587,7 +667,7 @@ export const PlayersGrid: React.FC = () => {
 
     setPrevIsMyTurn(currentIsMyTurn)
     setPrevPicksUntilTurn(currentPicksUntilTurn)
-  }, [isMyTurn(), getPicksUntilMyTurn(), prevIsMyTurn, prevPicksUntilTurn, isDraftConfigured])
+  }, [isMyTurn(), getPicksUntilMyTurn(), prevIsMyTurn, prevPicksUntilTurn, isDraftConfigured, tryTriggerUserTurnEdgeGuarded])
 
   // Force AG Grid to refresh when state changes
   React.useEffect(() => {
@@ -677,7 +757,7 @@ export const PlayersGrid: React.FC = () => {
     {
       headerName: 'Actions',
       width: 160,
-      cellRenderer: (params: ICellRendererParams<Player>) => <ActionButtonsCell {...params} toast={toast} />,
+      cellRenderer: (params: ICellRendererParams<Player>) => <ActionButtonsCell {...params} toast={toast} onUserTurnTrigger={tryTriggerUserTurnEdgeGuarded} />,
       sortable: false,
       filter: false,
       suppressHeaderMenuButton: true,
@@ -904,6 +984,7 @@ export const PlayersGrid: React.FC = () => {
       <DraftConfigModal
         visible={showConfigModal}
         onHide={() => setShowConfigModal(false)}
+        toast={toast}
       />
 
       <Toast ref={toast} />
