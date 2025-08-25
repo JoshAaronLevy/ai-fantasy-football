@@ -6,8 +6,8 @@ import { Button } from 'primereact/button'
 import { Message } from 'primereact/message'
 import { Toast } from 'primereact/toast'
 import { useDraftStore } from '../state/draftStore'
-import { getUserId, getConversationId, setConversationId } from '../lib/storage/localStore'
-import { marcoPingBlocking, initializeDraftBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
+import { getUserId, setConversationId } from '../lib/storage/localStore'
+import { initializeDraftBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
 import { mapToSlimTopN } from '../lib/players/slim'
 import { LoadingModal } from './LoadingModal'
 
@@ -15,7 +15,7 @@ interface DraftConfigModalProps {
   visible: boolean;
   onHide: () => void;
   onDraftInitialized?: () => void;
-  toast: React.RefObject<Toast>;
+  toast: React.RefObject<Toast | null>;
 }
 
 export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onHide, onDraftInitialized, toast }) => {
@@ -37,21 +37,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
   const [error, setError] = React.useState<string | null>(null)
   const [isInitializing, setIsInitializing] = React.useState(false)
-
-  const marcoPingFiredRef = React.useRef(false)
-
-  React.useEffect(() => {
-    if (marcoPingFiredRef.current) return;
-    marcoPingFiredRef.current = true;
-
-    (async () => {
-      try {
-        const { answer, upstreamStatus, duration_ms } = await marcoPingBlocking();
-      } catch (e) {
-        console.error('[MARCO ERROR]', e);
-      }
-    })();
-  }, []);
 
   React.useEffect(() => {
     if (visible) {
@@ -152,11 +137,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         players: slimmedRoster
       }
 
-      if (import.meta.env.DEV) {
-        const bytes = new TextEncoder().encode(JSON.stringify(payload)).length
-        console.log('[INIT payload bytes]', bytes)
-      }
-
       const data = await initializeDraftBlocking(payload)
 
       if (data?.error) {
@@ -242,11 +222,11 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       visible={visible}
       onHide={() => {}}
       header="Configure Your Draft"
-      style={{ width: '500px' }}
+      style={{ width: '600px' }}
       modal={true}
       closable={false}
       maskStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
-      contentStyle={{ padding: '2rem' }}
+      contentStyle={{ padding: '0 2rem 2rem 2rem' }}
     >
       <div className="space-y-6">
         {error && (
@@ -325,7 +305,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       <LoadingModal
         visible={isInitializing}
         title="Initializing draft…"
-        message="This may take up to a few minutes"
+        message="The AI Assistant is preparing your personalized draft strategy."
       />
     </Dialog>
   )

@@ -640,3 +640,11 @@ body {
 .underline {
   text-decoration: underline;
 }
+
+.full-width {
+  width: 100%;
+}
+
+.p-dialog-header {
+  text-align: center !important;
+}

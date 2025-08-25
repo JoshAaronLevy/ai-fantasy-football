@@ -446,7 +446,11 @@ const TeamLogoCell: React.FC<ICellRendererParams<Player>> = (params) => {
   )
 }
 
-export const PlayersGrid: React.FC = () => {
+interface PlayersGridProps {
+  toast: React.RefObject<Toast | null>
+}
+
+export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   // Read players data from store instead of React Query
   const data = useDraftStore((s) => s.players)
   const isLoading = useDraftStore((s) => s.playersLoading)
@@ -476,8 +480,6 @@ export const PlayersGrid: React.FC = () => {
   const [prevIsMyTurn, setPrevIsMyTurn] = React.useState(false)
   const [prevPicksUntilTurn, setPrevPicksUntilTurn] = React.useState(0)
   const [hidingPlayerIds, setHidingPlayerIds] = React.useState<Set<string>>(new Set())
-
-  const toast = React.useRef<Toast>(null)
   const lastTurnKeyRef = React.useRef<string | null>(null) // Guard against wheel double-calls
   const draftConfig = useDraftStore((s) => s.draftConfig)
   const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
@@ -501,8 +503,8 @@ export const PlayersGrid: React.FC = () => {
   const [isTaking, setIsTaking] = React.useState(false)
   
 
-  // Task 5: User turn trigger with wheel guard
-  const tryTriggerUserTurnEdgeGuarded = async () => {
+  // Task 5: User turn trigger with wheel guard - wrapped with useCallback to prevent unnecessary re-renders
+  const tryTriggerUserTurnEdgeGuarded = React.useCallback(async () => {
     const round = getCurrentRound();
     const pick = getCurrentPick();
     const turnKey = `${round}:${pick}`;
@@ -557,10 +559,10 @@ export const PlayersGrid: React.FC = () => {
         payload: {
           round,
           pick,
-          roster: slimRoster,
+          userRoster: slimRoster,
           availablePlayers: availablePlayers25,
-          numTeams,
-          slot
+          leagueSize: numTeams,
+          pickSlot: slot
         }
       });
       
@@ -615,7 +617,7 @@ export const PlayersGrid: React.FC = () => {
         life: 4000
       });
     }
-  };
+  }, [getCurrentRound, getCurrentPick, conversationId, isDraftConfigured, draftConfig.teams, draftConfig.pick, players, myTeam, isDrafted, isTaken, addConversationMessage, toast])
 
   // Handle round change animation
   React.useEffect(() => {
@@ -987,7 +989,6 @@ export const PlayersGrid: React.FC = () => {
         toast={toast}
       />
 
-      <Toast ref={toast} />
     </section>
   )
 }

@@ -71,7 +71,7 @@ export default function App() {
       <OfflineBanner />
       <Header onViewAIAnalysis={() => setShowAIAnalysis(true)} />
       <main className="custom-main">
-        <PlayersGrid />
+        <PlayersGrid toast={toast} />
       </main>
       <DraftConfigModal
         visible={showConfigModal}

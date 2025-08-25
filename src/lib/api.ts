@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Player } from '../types'
 import { getUserId } from './storage/localStore'
+import { bytesOf } from './bytes'
 
 // Lightweight local types for API client
 type SlimLike = {
@@ -19,7 +20,14 @@ type MinimalPickPlayer = SlimLike;
  * Helper function to extract text from LLM response data
  */
 export function getTextFromLlmResponse(res: any): string {
-  return res?.content ?? res?.answer ?? res?.data?.content ?? res?.data?.answer ?? '';
+  let text = res?.content ?? res?.answer ?? res?.data?.content ?? res?.data?.answer ?? '';
+  
+  // Strip leaked <think>...</think> tags from response
+  if (typeof text === 'string') {
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  }
+  
+  return text;
 }
 
 /**
@@ -128,8 +136,26 @@ export async function initializeDraftBlocking(params: {
 }): Promise<any> {
   const user = getUserId();
   const payload = params;
-  console.log('Initializing draft with payload: ', payload);
-  return blockingFetch('/draft/initialize', { user, payload }, 300000); // 300s timeout
+  const body = { user, payload };
+  
+  // Add byte size preflight checks
+  const bytes = bytesOf(body);
+  const playerCount = Array.isArray(params.players) ? params.players.length : 0;
+
+  if (bytes >= 300_000) {
+    console.error('[PAYLOAD][ALERT] /draft/initialize bytes', { bytes, players: playerCount });
+  } else if (bytes >= 150_000) {
+    console.warn('[PAYLOAD][WARN] /draft/initialize bytes', { bytes, players: playerCount });
+  }
+
+  const res = await blockingFetch('/draft/initialize', body, 300000); // 300s timeout
+  
+  // Ensure conversationId persistence after successful response
+  if (res?.conversationId) {
+    localStorage.setItem('app.draft.conversationId', String(res.conversationId));
+  }
+  
+  return res;
 }
 
 // Reset draft
@@ -150,7 +176,16 @@ export async function playerTakenBlocking(params: {
     player: MinimalPickPlayer;
   };
 }): Promise<any> {
-  return blockingFetch('/draft/player-taken', params, 60000); // 60s timeout for ACK operation
+  // FIX: Flatten the payload structure as backend expects player, round, pick, conversationId at top level
+  const flattenedPayload = {
+    user: params.user,
+    conversationId: params.conversationId,
+    player: params.payload.player,
+    round: params.payload.round,
+    pick: params.payload.pick
+  };
+  
+  return blockingFetch('/draft/player-taken', flattenedPayload, 60000); // 60s timeout for ACK operation
 }
 
 // Player drafted notification
@@ -173,11 +208,29 @@ export async function userTurnBlocking(params: {
   payload: {
     round: number;
     pick: number;
-    roster: SlimLike[];
+    userRoster: SlimLike[];
     availablePlayers: SlimLike[];
-    numTeams: number;
-    slot: number;
+    leagueSize: number;
+    pickSlot: number;
   };
 }): Promise<any> {
-  return blockingFetch('/draft/user-turn', params, 90000); // 90s timeout for user-turn operation
+  // Add byte size preflight checks
+  const body = params;
+  const bytes = bytesOf(body);
+  const playerCount = Array.isArray(params.payload.availablePlayers) ? params.payload.availablePlayers.length : 0;
+
+  if (bytes >= 300_000) {
+    console.error('[PAYLOAD][ALERT] /draft/user-turn bytes', { bytes, players: playerCount });
+  } else if (bytes >= 150_000) {
+    console.warn('[PAYLOAD][WARN] /draft/user-turn bytes', { bytes, players: playerCount });
+  }
+
+  const res = await blockingFetch('/draft/user-turn', params, 90000); // 90s timeout for user-turn operation
+  
+  // Ensure conversationId persistence after successful response
+  if (res?.conversationId) {
+    localStorage.setItem('app.draft.conversationId', String(res.conversationId));
+  }
+  
+  return res;
 }
