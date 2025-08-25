@@ -38,7 +38,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const [error, setError] = React.useState<string | null>(null)
   const [isInitializing, setIsInitializing] = React.useState(false)
 
-  // StrictMode guard to prevent double-fire of Marco ping
   const marcoPingFiredRef = React.useRef(false)
 
   React.useEffect(() => {
@@ -54,7 +53,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     })();
   }, []);
 
-  // Reset form when modal opens with current config
   React.useEffect(() => {
     if (visible) {
       setSelectedTeams(draftConfig.teams)
@@ -62,7 +60,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     }
   }, [visible, draftConfig])
 
-  // Reset pick when teams changes
   React.useEffect(() => {
     if (selectedTeams !== null && (selectedPick === null || selectedPick > selectedTeams)) {
       setSelectedPick(null)
@@ -87,9 +84,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const isFormValid = selectedTeams !== null && selectedPick !== null
 
   const onLetsDraft = async () => {
-    console.log('player[0]: ', players[0]);
-
-    // Early return guard for duplicate clicks
     if (isInitializing) {
       console.debug('INIT DRAFT: blocked (already initializing)');
       return;
@@ -99,13 +93,11 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
 
     const config = { teams: selectedTeams, pick: selectedPick }
 
-    // Validate players dataset
     if (players.length === 0) {
       setError('No players available. Please ensure player data is loaded.');
       return;
     }
 
-    // Validate user ID generation before proceeding
     try {
       const userId = getUserId();
       if (!userId || typeof userId !== 'string' || userId.trim() === '') {
@@ -131,7 +123,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     setIsInitializing(true)
     setError(null)
 
-    // Check if we're already in offline mode
     if (isOfflineMode) {
       try {
         initializeDraftOffline(config)
@@ -150,31 +141,24 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     }
 
     try {
-      // Build top players (slimmedRoster) as an array of slim players limited to 12
       const availablePlayers = players
         .filter(player => !isDrafted(player.id) && !isTaken(player.id))
 
-      // OLD: const top25Slim = mapToSlimTopN(availablePlayers, 25)
-      const slimmedRoster = mapToSlimTopN(availablePlayers, 6)
+      const slimmedRoster = mapToSlimTopN(availablePlayers, 25)
 
-      // Construct the request payload without conversationId
       const payload = {
         numTeams: selectedTeams,
         userPickPosition: selectedPick,
         players: slimmedRoster
       }
 
-      // Log payload size in dev mode
       if (import.meta.env.DEV) {
         const bytes = new TextEncoder().encode(JSON.stringify(payload)).length
         console.log('[INIT payload bytes]', bytes)
       }
 
-      console.debug('INIT DRAFT: calling initialize API');
       const data = await initializeDraftBlocking(payload)
-      console.debug('INIT DRAFT: initialize API success');
 
-      // Check for server error response
       if (data?.error) {
         const errorDetail = formatApiError(data, 'Draft initialization failed')
         
@@ -188,25 +172,20 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         return
       }
 
-      // Store conversationId in localStorage if present
       if (data.conversationId) {
         setConversationId('draft', data.conversationId)
       }
 
-      // Get normalized content from response
       const strategyContent = getTextFromLlmResponse(data)
 
-      // Push initial strategy message to the UI
       setAiAnswer(strategyContent)
 
-      // Initialize draft state
       initializeDraftState(
         data.conversationId || '',
         strategyContent || 'Draft strategy initialized.',
         config
       )
 
-      // Show success toast
       toast.current?.show({
         severity: 'success',
         summary: 'Draft Initialized',
@@ -214,17 +193,15 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 3000
       })
 
-      // Close modal and open AI drawer
       onHide()
       onDraftInitialized?.()
     } catch (err) {
       console.debug('INIT DRAFT: initialize API error', err);
-      // Enter offline mode and set up offline draft
+      console.warn('Unable to connect to server, falling back to offline mode');
       setOfflineMode(true)
       setShowOfflineBanner(true)
       initializeDraftOffline(config)
 
-      // Store the failed API call for potential retry
       const availablePlayers = players
         .filter(player => !isDrafted(player.id) && !isTaken(player.id))
       
@@ -234,7 +211,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         players: availablePlayers.slice(0, 200)
       })
 
-      // Show error message
       const errorMessage = err instanceof Error ? err.message : 'Initialize failed'
       toast.current?.show({
         severity: 'error',
@@ -243,11 +219,9 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 5000
       })
 
-      // Close modal and still trigger the drawer since we have offline functionality
       onHide()
       onDraftInitialized?.()
     } finally {
-      console.debug('INIT DRAFT: initialize done (clearing initializing flag)');
       setIsInitializing(false)
     }
   }
@@ -257,7 +231,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     onHide()
   }
 
-  // Reset error when modal opens
   React.useEffect(() => {
     if (visible) {
       setError(null)
@@ -267,11 +240,11 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   return (
     <Dialog
       visible={visible}
-      onHide={() => {}} // Prevent closing by clicking outside or escape
+      onHide={() => {}}
       header="Configure Your Draft"
       style={{ width: '500px' }}
       modal={true}
-      closable={false} // Remove X button
+      closable={false}
       maskStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
       contentStyle={{ padding: '2rem' }}
     >
