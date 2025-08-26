@@ -251,10 +251,7 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         });
       }
       
-      // After success, re-evaluate isMyTurn and trigger Task 5 if needed
-      if (isMyTurn()) {
-        tryTriggerUserTurnEdgeGuarded?.();
-      }
+      // Note: User turn detection is handled by the main useEffect with wheel guard
       
     } catch (error) {
       console.error('Draft API error:', error);
@@ -327,10 +324,7 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         });
       }
       
-      // After success, re-evaluate isMyTurn and trigger Task 5 if needed
-      if (isMyTurn()) {
-        tryTriggerUserTurnEdgeGuarded?.();
-      }
+      // Note: User turn detection is handled by the main useEffect with wheel guard
       
     } catch (error) {
       console.error('Take API error:', error);
@@ -693,12 +687,13 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
     }
   }, [currentRound, prevRound])
 
+  // Get reactive values from Zustand store to prevent infinite loops
+  const currentIsMyTurn = useDraftStore((s) => s.isMyTurn())
+  const currentPicksUntilTurn = useDraftStore((s) => s.getPicksUntilMyTurn())
+
   // Task 5: Turn detection effect with edge transition monitoring
   React.useEffect(() => {
     if (!isDraftConfigured()) return
-
-    const currentIsMyTurn = isMyTurn()
-    const currentPicksUntilTurn = getPicksUntilMyTurn()
 
     // Show "You're up next" toast when exactly 1 pick until my turn
     if (currentPicksUntilTurn === 1 && prevPicksUntilTurn !== 1) {
@@ -733,7 +728,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
 
     setPrevIsMyTurn(currentIsMyTurn)
     setPrevPicksUntilTurn(currentPicksUntilTurn)
-  }, [isMyTurn(), getPicksUntilMyTurn(), prevIsMyTurn, prevPicksUntilTurn, isDraftConfigured, tryTriggerUserTurnEdgeGuarded])
+  }, [currentIsMyTurn, currentPicksUntilTurn, prevIsMyTurn, prevPicksUntilTurn, isDraftConfigured, tryTriggerUserTurnEdgeGuarded])
 
   // Force AG Grid to refresh when state changes
   React.useEffect(() => {

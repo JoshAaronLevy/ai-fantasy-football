@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { Sidebar } from 'primereact/sidebar'
 import { Card } from 'primereact/card'
 import { Tag } from 'primereact/tag'
 import { ScrollPanel } from 'primereact/scrollpanel'
+import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { useDraftStore } from '../state/draftStore'
 import { MarkdownRenderer } from './common/MarkdownRenderer'
@@ -45,9 +46,93 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const isApiLoading = useDraftStore((s) => s.isApiLoading)
   const aiAnswer = useDraftStore((s) => s.aiAnswer)
   
+  // Scroll management state and refs
+  const scrollPanelRef = useRef<ScrollPanel>(null)
+  const [isUserAtBottom, setIsUserAtBottom] = useState(true)
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false)
+  const [lastSeenMessageCount, setLastSeenMessageCount] = useState(0)
+  
   // Get roster players (for display)
   const rosterPlayerIds = Object.keys(myTeam)
   const hasRoster = rosterPlayerIds.length > 0
+
+  // Auto-scroll to bottom function with smooth behavior
+  const scrollToBottom = (smooth = true) => {
+    if (scrollPanelRef.current) {
+      const scrollElement = scrollPanelRef.current.getElement()
+      if (scrollElement) {
+        const scrollContent = scrollElement.querySelector('.p-scrollpanel-content')
+        if (scrollContent) {
+          scrollContent.scrollTo({
+            top: scrollContent.scrollHeight,
+            behavior: smooth ? 'smooth' : 'auto'
+          })
+          setIsUserAtBottom(true)
+          setShowScrollButton(false)
+        }
+      }
+    }
+  }
+
+  // Handle scroll events to detect user position
+  const handleScroll = () => {
+    if (scrollPanelRef.current) {
+      const scrollElement = scrollPanelRef.current.getElement()
+      if (scrollElement) {
+        const scrollContent = scrollElement.querySelector('.p-scrollpanel-content')
+        if (scrollContent) {
+          const { scrollTop, scrollHeight, clientHeight } = scrollContent
+          const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10 // 10px threshold
+          setIsUserAtBottom(isAtBottom)
+          setShowScrollButton(!isAtBottom && conversationMessages.length > 0)
+        }
+      }
+    }
+  }
+
+  // Auto-scroll when drawer opens
+  useEffect(() => {
+    if (visible && conversationMessages.length > 0) {
+      // Small delay to ensure the drawer is fully rendered
+      setTimeout(() => {
+        scrollToBottom(false) // No smooth scroll on initial open for better UX
+        setHasUnreadMessages(false)
+        setLastSeenMessageCount(conversationMessages.length)
+      }, 100)
+    }
+  }, [visible])
+
+  // Auto-scroll when new messages arrive (only if user is at bottom or drawer is visible)
+  useEffect(() => {
+    if (conversationMessages.length > lastSeenMessageCount) {
+      if (visible) {
+        if (isUserAtBottom) {
+          // User is at bottom, auto-scroll to new message
+          setTimeout(() => scrollToBottom(true), 50)
+        }
+        setLastSeenMessageCount(conversationMessages.length)
+        setHasUnreadMessages(false)
+      } else {
+        // Drawer is closed, mark as having unread messages
+        setHasUnreadMessages(true)
+      }
+    }
+  }, [conversationMessages.length, visible, isUserAtBottom, lastSeenMessageCount])
+
+  // Set up scroll listener
+  useEffect(() => {
+    if (scrollPanelRef.current) {
+      const scrollElement = scrollPanelRef.current.getElement()
+      if (scrollElement) {
+        const scrollContent = scrollElement.querySelector('.p-scrollpanel-content')
+        if (scrollContent) {
+          scrollContent.addEventListener('scroll', handleScroll)
+          return () => scrollContent.removeEventListener('scroll', handleScroll)
+        }
+      }
+    }
+  }, [conversationMessages.length])
 
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp)
@@ -98,10 +183,18 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
             <i className="pi pi-chart-line text-xl"></i>
             <span className="font-semibold text-lg">AI Draft Analysis</span>
             {conversationId && (
-              <Tag 
-                value="Connected" 
-                severity="success" 
-                className="text-xs" 
+              <Tag
+                value="Connected"
+                severity="success"
+                className="text-xs"
+              />
+            )}
+            {hasUnreadMessages && !visible && (
+              <Tag
+                value="New"
+                severity="info"
+                className="text-xs animate-pulse"
+                style={{ backgroundColor: '#3b82f6' }}
               />
             )}
           </div>
@@ -188,8 +281,12 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
 
             {/* Conversation Messages */}
             {conversationMessages.length > 0 && (
-              <div className="h-full flex flex-col">
-                <ScrollPanel style={{ width: '100%', height: '100%' }} className="pr-4">
+              <div className="h-full flex flex-col relative">
+                <ScrollPanel
+                  ref={scrollPanelRef}
+                  style={{ width: '100%', height: '100%' }}
+                  className="pr-4"
+                >
                   <div className="space-y-4">
                     {conversationMessages.map((message) => (
                       <div key={message.id} className="bg-gray-50 rounded-lg p-4">
@@ -244,6 +341,24 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                   </div>
                 </ScrollPanel>
                 
+                {/* Scroll to Latest Button */}
+                {showScrollButton && (
+                  <div className="absolute bottom-16 right-4 z-10">
+                    <Button
+                      icon="pi pi-arrow-down"
+                      className="p-button-rounded p-button-info p-button-sm shadow-lg"
+                      tooltip="Scroll to latest message"
+                      tooltipOptions={{ position: 'left' }}
+                      onClick={() => scrollToBottom(true)}
+                      style={{
+                        backgroundColor: '#3b82f6',
+                        borderColor: '#3b82f6',
+                        animation: 'pulse 2s infinite'
+                      }}
+                    />
+                  </div>
+                )}
+                
                 {/* Conversation Footer */}
                 <div className="mt-4 pt-3 border-t border-gray-200">
                   <div className="flex items-center justify-between">
@@ -253,6 +368,15 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                         AI analysis updates automatically as the draft progresses
                       </span>
                     </div>
+                    {conversationMessages.length > 3 && (
+                      <Button
+                        icon="pi pi-arrow-down"
+                        label="Latest"
+                        className="p-button-text p-button-sm text-xs"
+                        onClick={() => scrollToBottom(true)}
+                        style={{ color: '#6b7280' }}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
