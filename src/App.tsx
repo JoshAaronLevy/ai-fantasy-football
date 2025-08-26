@@ -7,6 +7,7 @@ import { AIAnalysisDrawer } from './components/AIAnalysisDrawer'
 import { OfflineBanner } from './components/OfflineBanner'
 import { useDraftStore } from './state/draftStore'
 import { fetchPlayers } from './lib/api'
+import { FORCE_OFFLINE_MODE } from './lib/debug/devFlags'
 
 export default function App() {
   const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
@@ -23,9 +24,23 @@ export default function App() {
   // Toast ref for showing notifications
   const toast = React.useRef<Toast>(null)
 
+  // Force offline mode for testing if development flag is set
+  React.useEffect(() => {
+    if (FORCE_OFFLINE_MODE) {
+      setOfflineMode(true)
+      setShowOfflineBanner(true)
+    }
+  }, [setOfflineMode, setShowOfflineBanner])
+
   // Fetch players on component mount
   React.useEffect(() => {
     const loadPlayers = async () => {
+      // Skip fetching if force offline mode is enabled
+      if (FORCE_OFFLINE_MODE) {
+        setPlayersLoading(false)
+        return
+      }
+      
       // Only fetch if we don't already have players loaded
       try {
         setPlayersLoading(true)
@@ -68,7 +83,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       <Toast ref={toast} />
-      <OfflineBanner />
+      <OfflineBanner toast={toast} />
       <Header onViewAIAnalysis={() => setShowAIAnalysis(true)} />
       <main className="custom-main">
         <PlayersGrid toast={toast} />

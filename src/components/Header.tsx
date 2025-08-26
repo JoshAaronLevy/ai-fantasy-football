@@ -2,6 +2,7 @@
 import React from 'react'
 import { Toolbar } from 'primereact/toolbar'
 import { Button } from 'primereact/button'
+import { Tag } from 'primereact/tag'
 import { resetBlocking, formatApiError } from '../lib/api'
 import { getUserId, clearConversationId, getConversationId } from '../lib/storage/localStore'
 import { useDraftStore } from '../state/draftStore'
@@ -13,7 +14,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
   const [isResetting, setIsResetting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const { clearAiAnswer, clearLocalState } = useDraftStore()
+  const { clearAiAnswer, clearLocalState, isOfflineMode } = useDraftStore()
 
   const onReset = async () => {
     setIsResetting(true)
@@ -59,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
       }}>
         <span style={{ fontSize: '1.5rem' }}>🏈</span>
       </div>
-      <div>
+      <div className="flex items-center gap-2">
         <h1 style={{
           fontSize: 'clamp(1.25rem, 2.5vw, 1.5rem)',
           fontWeight: '600',
@@ -69,6 +70,18 @@ export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
         }}>
           Boykies Fantasy Football
         </h1>
+        {isOfflineMode && (
+          <Tag
+            value="Offline"
+            severity="warning"
+            className="text-xs"
+            style={{
+              backgroundColor: 'rgba(255, 193, 7, 0.9)',
+              color: '#856404',
+              fontWeight: '600'
+            }}
+          />
+        )}
       </div>
     </div>
   )

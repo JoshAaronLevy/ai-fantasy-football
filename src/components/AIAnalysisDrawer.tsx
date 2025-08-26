@@ -5,6 +5,7 @@ import { Tag } from 'primereact/tag'
 import { ScrollPanel } from 'primereact/scrollpanel'
 import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
+import { Message } from 'primereact/message'
 import { useDraftStore } from '../state/draftStore'
 import { MarkdownRenderer } from './common/MarkdownRenderer'
 import type { ConversationMessage } from '../types'
@@ -45,6 +46,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const conversationMessages = useDraftStore((s) => s.conversationMessages)
   const isApiLoading = useDraftStore((s) => s.isApiLoading)
   const aiAnswer = useDraftStore((s) => s.aiAnswer)
+  const isOfflineMode = useDraftStore((s) => s.isOfflineMode)
   
   // Scroll management state and refs
   const scrollPanelRef = useRef<ScrollPanel>(null)
@@ -96,12 +98,14 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
     if (visible && conversationMessages.length > 0) {
       // Small delay to ensure the drawer is fully rendered
       setTimeout(() => {
-        scrollToBottom(false) // No smooth scroll on initial open for better UX
+        // Use smooth scrolling if there are unread messages, otherwise instant
+        const shouldSmoothScroll = hasUnreadMessages
+        scrollToBottom(shouldSmoothScroll)
         setHasUnreadMessages(false)
         setLastSeenMessageCount(conversationMessages.length)
       }, 100)
     }
-  }, [visible])
+  }, [visible, hasUnreadMessages])
 
   // Auto-scroll when new messages arrive (only if user is at bottom or drawer is visible)
   useEffect(() => {
@@ -202,6 +206,20 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
       }
     >
       <div className="flex flex-col gap-4 h-full">
+        {/* Offline Message - Show when in offline mode */}
+        {isOfflineMode && (
+          <Message
+            severity="info"
+            text="Live analysis paused while offline."
+            className="mb-4"
+            style={{
+              backgroundColor: '#e3f2fd',
+              borderColor: '#2196f3',
+              color: '#1565c0'
+            }}
+          />
+        )}
+
         {/* Roster Section - Only show if user has drafted players */}
         {hasRoster && (
           <Card

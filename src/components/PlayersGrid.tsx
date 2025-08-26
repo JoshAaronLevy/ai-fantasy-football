@@ -17,6 +17,7 @@ import { Star, StarOff, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { playerTakenBlocking, userDraftedBlocking, userTurnBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
 import { toMinimalPickFromAny, mapToSlimTopN } from '../lib/players/slim'
 import { getConversationId, getUserId } from '../lib/storage/localStore'
+import { classifyError } from '../lib/httpErrors'
 
 const StarCell: React.FC<ICellRendererParams<Player>> = (params) => {
   const data = params.data
@@ -56,7 +57,7 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   toast: React.RefObject<Toast | null>;
   onUserTurnTrigger?: () => void;
 }> = (params) => {
-  const { data, toast, onUserTurnTrigger } = params
+  const { data, toast } = params
   const [isTaking, setIsTaking] = useState(false)
   const [isDrafting, setIsDrafting] = useState(false)
   const draftPlayer = useDraftStore((s) => s.draftPlayer)
@@ -70,16 +71,12 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
   const conversationId = useDraftStore((s) => s.conversationId)
   const markPlayerTaken = useDraftStore((s) => s.markPlayerTaken)
-  const isMyTurn = useDraftStore((s) => s.isMyTurn)
+  
+  // Offline mode functions
   const isOfflineMode = useDraftStore((s) => s.isOfflineMode)
+  const addToQueue = useDraftStore((s) => s.addToQueue)
   const setOfflineMode = useDraftStore((s) => s.setOfflineMode)
-  const setShowOfflineBanner = useDraftStore((s) => s.setShowOfflineBanner)
-  const draftConfig = useDraftStore((s) => s.draftConfig)
-
-  // Task 5: User turn edge guard - calls the trigger function passed from parent
-  const tryTriggerUserTurnEdgeGuarded = () => {
-    onUserTurnTrigger?.();
-  };
+  const actionHistory = useDraftStore((s) => s.actionHistory)
   
   if (!data) return null
 
@@ -197,13 +194,44 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
     try {
       const round = getCurrentRound();
       const pick = getCurrentPick();
-      
-      // Build minimal player payload
-      const minimal = toMinimalPickFromAny(data);
-      
-      // Get conversationId and userId
-      const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
       const userId = getUserId() || 'user';
+      const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
+      
+      // If in offline mode, handle locally
+      if (isOfflineMode) {
+        // Execute draft action locally
+        draftPlayer(data.id);
+        
+        // Add action to queue for later sync
+        addToQueue({
+          type: 'draft',
+          payload: {
+            playerId: data.id,
+            player: data,
+            round,
+            pick,
+            conversationId: activeConversationId || undefined,
+            userId
+          },
+          localState: {
+            playerDrafted: true,
+            actionHistoryIndex: actionHistory.length
+          }
+        });
+        
+        // Show offline toast
+        toast.current?.show({
+          severity: 'success',
+          summary: 'Player Drafted (Offline)',
+          detail: `${data.name} added to your team - will sync when reconnected`,
+          life: 3000
+        });
+        
+        return;
+      }
+      
+      // Online mode - attempt API call
+      const minimal = toMinimalPickFromAny(data);
       
       if (!activeConversationId) {
         toast.current?.show({
@@ -251,16 +279,59 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         });
       }
       
-      // Note: User turn detection is handled by the main useEffect with wheel guard
-      
     } catch (error) {
       console.error('Draft API error:', error);
-      toast.current?.show({
-        severity: 'error',
-        summary: 'API Error',
-        detail: error instanceof Error ? error.message : 'Unknown error',
-        life: 4000
-      });
+      
+      // Check if this is an offline-worthy error
+      const classification = classifyError(error);
+      if (classification.offlineWorthy) {
+        // Switch to offline mode and retry the action
+        setOfflineMode(true);
+        
+        toast.current?.show({
+          severity: 'warn',
+          summary: 'Connection Lost',
+          detail: 'Switched to offline mode - continuing draft offline',
+          life: 3000
+        });
+        
+        // Retry as offline action
+        const round = getCurrentRound();
+        const pick = getCurrentPick();
+        const userId = getUserId() || 'user';
+        const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
+        
+        draftPlayer(data.id);
+        addToQueue({
+          type: 'draft',
+          payload: {
+            playerId: data.id,
+            player: data,
+            round,
+            pick,
+            conversationId: activeConversationId || undefined,
+            userId
+          },
+          localState: {
+            playerDrafted: true,
+            actionHistoryIndex: actionHistory.length
+          }
+        });
+        
+        toast.current?.show({
+          severity: 'success',
+          summary: 'Player Drafted (Offline)',
+          detail: `${data.name} added to your team - will sync when reconnected`,
+          life: 3000
+        });
+      } else {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'API Error',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          life: 4000
+        });
+      }
     } finally {
       setIsDrafting(false);
     }
@@ -274,13 +345,44 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
     try {
       const round = getCurrentRound();
       const pick = getCurrentPick();
-      
-      // Build minimal player payload
-      const minimal = toMinimalPickFromAny(data);
-      
-      // Get conversationId and userId
-      const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
       const userId = getUserId() || 'user';
+      const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
+      
+      // If in offline mode, handle locally
+      if (isOfflineMode) {
+        // Execute taken action locally
+        markPlayerTaken(data.id, data, 'Player marked as taken (offline)', activeConversationId || undefined);
+        
+        // Add action to queue for later sync
+        addToQueue({
+          type: 'taken',
+          payload: {
+            playerId: data.id,
+            player: data,
+            round,
+            pick,
+            conversationId: activeConversationId || undefined,
+            userId
+          },
+          localState: {
+            playerTaken: true,
+            actionHistoryIndex: actionHistory.length
+          }
+        });
+        
+        // Show offline toast
+        toast.current?.show({
+          severity: 'info',
+          summary: 'Player Marked as Taken (Offline)',
+          detail: `${data.name} marked as taken - will sync when reconnected`,
+          life: 3000
+        });
+        
+        return;
+      }
+      
+      // Online mode - attempt API call
+      const minimal = toMinimalPickFromAny(data);
       
       if (!activeConversationId) {
         toast.current?.show({
@@ -301,6 +403,25 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
       
       // Check for error in response
       if (result?.error) {
+        // Special handling for 409 invalid_conversation - session expired
+        if (result.error.code === 409 && result.error.message?.includes('invalid_conversation')) {
+          // Clear conversation ID from localStorage
+          localStorage.removeItem('app.draft.conversationId');
+          
+          // Reset draft to trigger config modal
+          const resetDraft = useDraftStore.getState().resetDraft;
+          resetDraft();
+          
+          toast.current?.show({
+            severity: 'warn',
+            summary: 'Session Expired',
+            detail: 'Please re-initialize your draft.',
+            life: 5000
+          });
+          return;
+        }
+        
+        // Handle other errors normally
         const errorDetail = formatApiError(result, 'Mark as taken failed')
         toast.current?.show({
           severity: 'error',
@@ -324,16 +445,59 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         });
       }
       
-      // Note: User turn detection is handled by the main useEffect with wheel guard
-      
     } catch (error) {
       console.error('Take API error:', error);
-      toast.current?.show({
-        severity: 'error',
-        summary: 'API Error',
-        detail: error instanceof Error ? error.message : 'Unknown error',
-        life: 4000
-      });
+      
+      // Check if this is an offline-worthy error
+      const classification = classifyError(error);
+      if (classification.offlineWorthy) {
+        // Switch to offline mode and retry the action
+        setOfflineMode(true);
+        
+        toast.current?.show({
+          severity: 'warn',
+          summary: 'Connection Lost',
+          detail: 'Switched to offline mode - continuing draft offline',
+          life: 3000
+        });
+        
+        // Retry as offline action
+        const round = getCurrentRound();
+        const pick = getCurrentPick();
+        const userId = getUserId() || 'user';
+        const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
+        
+        markPlayerTaken(data.id, data, 'Player marked as taken (offline)', activeConversationId || undefined);
+        addToQueue({
+          type: 'taken',
+          payload: {
+            playerId: data.id,
+            player: data,
+            round,
+            pick,
+            conversationId: activeConversationId || undefined,
+            userId
+          },
+          localState: {
+            playerTaken: true,
+            actionHistoryIndex: actionHistory.length
+          }
+        });
+        
+        toast.current?.show({
+          severity: 'info',
+          summary: 'Player Marked as Taken (Offline)',
+          detail: `${data.name} marked as taken - will sync when reconnected`,
+          life: 3000
+        });
+      } else {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'API Error',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          life: 4000
+        });
+      }
     } finally {
       setIsTaking(false);
     }
@@ -348,7 +512,7 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
       justifyContent: 'center'
     }}>
       <Button
-        label={drafted ? 'Drafted' : isDrafting ? 'Drafting…' : 'Draft'}
+        label={drafted ? 'Drafted' : isDrafting ? 'Drafting…' : isOfflineMode ? 'Draft (Offline)' : 'Draft'}
         onClick={handleDraftClick}
         disabled={!canDraftThisPlayer || isDrafting || isTaking}
         className={!canDraftThisPlayer || isDrafting || isTaking ? 'p-button-secondary' : 'p-button-success'}
@@ -362,13 +526,14 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           !canDraft() ? 'Not your turn' :
           isDrafting ? 'Processing draft...' :
           isTaking ? 'Taking player...' :
+          isOfflineMode ? 'Add to my team (will sync when reconnected)' :
           'Add to my team'
         }
         tooltipOptions={{ position: 'top' }}
       />
       
       <Button
-        label={isTaking ? 'Acknowledging…' : 'Taken'}
+        label={isTaking ? 'Acknowledging…' : isOfflineMode ? 'Taken (Offline)' : 'Taken'}
         onClick={handleTakeClick}
         disabled={!canTakeThisPlayer || isTaking || isDrafting}
         className={!canTakeThisPlayer || isTaking || isDrafting ? 'p-button-secondary' : 'p-button-danger'}
@@ -382,6 +547,7 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           !canTake() ? 'Your turn to draft' :
           isTaking ? 'Processing...' :
           isDrafting ? 'Drafting player...' :
+          isOfflineMode ? 'Mark as taken (will sync when reconnected)' :
           'Mark as taken'
         }
         tooltipOptions={{ position: 'top' }}
@@ -525,8 +691,6 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   const actionHistory = useDraftStore((s) => s.actionHistory)
   const drafted = useDraftStore((s) => s.drafted)
   const taken = useDraftStore((s) => s.taken)
-  const isMyTurn = useDraftStore((s) => s.isMyTurn)
-  const getPicksUntilMyTurn = useDraftStore((s) => s.getPicksUntilMyTurn)
 
   const [quickFilter, setQuickFilter] = React.useState('')
   const [showStarredOnly, setShowStarredOnly] = React.useState(false)
@@ -549,16 +713,8 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
   const myTeam = useDraftStore((s) => s.myTeam)
   const players = useDraftStore((s) => s.players)
-  const draftPlayer = useDraftStore((s) => s.draftPlayer)
-  const markPlayerTaken = useDraftStore((s) => s.markPlayerTaken)
-  const canDraft = useDraftStore((s) => s.canDraft)
-  const canTake = useDraftStore((s) => s.canTake)
   const addConversationMessage = useDraftStore((s) => s.addConversationMessage)
   const conversationId = useDraftStore((s) => s.conversationId)
-  const isOfflineMode = useDraftStore((s) => s.isOfflineMode)
-  const setOfflineMode = useDraftStore((s) => s.setOfflineMode)
-  const setShowOfflineBanner = useDraftStore((s) => s.setShowOfflineBanner)
-  const [isTaking, setIsTaking] = React.useState(false)
   
 
   // Task 5: User turn trigger with wheel guard - wrapped with useCallback to prevent unnecessary re-renders
@@ -629,6 +785,25 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
       
       // Check for error in response
       if (result?.error) {
+        // Special handling for 409 invalid_conversation - session expired
+        if (result.error.code === 409 && result.error.message?.includes('invalid_conversation')) {
+          // Clear conversation ID from localStorage
+          localStorage.removeItem('app.draft.conversationId');
+          
+          // Reset draft to trigger config modal
+          const resetDraft = useDraftStore.getState().resetDraft;
+          resetDraft();
+          
+          toast.current?.show({
+            severity: 'warn',
+            summary: 'Session Expired',
+            detail: 'Please re-initialize your draft.',
+            life: 5000
+          });
+          return;
+        }
+        
+        // Handle other errors normally (offline detection already handled by withOfflineDetection)
         const errorDetail = formatApiError(result, 'Analysis failed')
         toast.current?.show({
           severity: 'error',

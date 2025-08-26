@@ -43,3 +43,69 @@ export interface AIConversationState {
   lastUpdated: number;
 }
 
+// Draft Configuration interface
+export interface DraftConfiguration {
+  teams: number | null;
+  pick: number | null;
+}
+
+// Enhanced Action Queue Types for Offline Mode
+export interface QueuedAction {
+  id: string; // UUID for deduplication
+  type: 'draft' | 'taken' | 'initializeDraft';
+  timestamp: number;
+  status: 'pending' | 'syncing' | 'synced' | 'failed' | 'conflict';
+  attempt: number; // Retry counter
+  payload: {
+    // Action-specific data
+    playerId?: string;
+    player?: Player;
+    round?: number;
+    pick?: number;
+    conversationId?: string;
+    userId: string;
+    // Draft initialization data
+    draftConfig?: DraftConfiguration;
+  };
+  localState?: {
+    // Snapshot of local state changes for rollback
+    playerDrafted?: boolean;
+    playerTaken?: boolean;
+    actionHistoryIndex?: number;
+  };
+  conflictData?: {
+    serverState: Record<string, unknown>;
+    localState: Record<string, unknown>;
+    resolutionNeeded: boolean;
+  };
+}
+
+export interface ActionQueueState {
+  queue: QueuedAction[];
+  isProcessing: boolean;
+  lastSyncAttempt: number;
+  syncErrors: Array<{
+    actionId: string;
+    error: string;
+    timestamp: number;
+  }>;
+}
+
+export const ConflictType = {
+  PLAYER_ALREADY_DRAFTED: 'player_already_drafted',
+  TURN_ORDER_MISMATCH: 'turn_order_mismatch',
+  ROUND_PROGRESSION: 'round_progression',
+  CONVERSATION_EXPIRED: 'conversation_expired'
+} as const;
+
+export type ConflictType = typeof ConflictType[keyof typeof ConflictType];
+
+export const ResolutionStrategy = {
+  USE_SERVER: 'use_server',    // Discard local changes
+  USE_LOCAL: 'use_local',      // Force local changes
+  MERGE: 'merge',              // Intelligent merge
+  SKIP: 'skip'                 // Skip this action
+} as const;
+
+export type ResolutionStrategy = typeof ResolutionStrategy[keyof typeof ResolutionStrategy];
+

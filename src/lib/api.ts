@@ -2,6 +2,18 @@
 import type { Player } from '../types'
 import { getUserId } from './storage/localStore'
 import { bytesOf } from './bytes'
+import { classifyError } from './httpErrors'
+
+// Import draftStore for offline mode integration
+let draftStore: any = null;
+try {
+  // Dynamic import to avoid circular dependencies
+  import('../state/draftStore').then(module => {
+    draftStore = module.useDraftStore;
+  });
+} catch {
+  // Handle gracefully if store is not available
+}
 
 // Lightweight local types for API client
 type SlimLike = {
@@ -96,6 +108,77 @@ async function blockingFetch(
   }
 }
 
+/**
+ * API wrapper that automatically detects offline-worthy errors and triggers offline mode
+ * @param apiCall - The API function to call
+ * @param options - Configuration options
+ * @returns The result from the API call, or handles offline mode if needed
+ */
+async function withOfflineDetection<T>(
+  apiCall: () => Promise<T>,
+  options: {
+    fallbackToOffline?: boolean;
+    operationType?: 'initializeDraft' | 'playerTaken' | 'userTurn';
+    payload?: Record<string, unknown>;
+  } = {}
+): Promise<T> {
+  try {
+    const result = await apiCall();
+    
+    // Check if result indicates an error (from blockingFetch)
+    if (result && typeof result === 'object' && 'error' in result) {
+      const classification = classifyError(result);
+      
+      if (classification.offlineWorthy && draftStore) {
+        const store = draftStore.getState();
+        
+        // Only set offline mode if not already offline
+        if (!store.isOfflineMode) {
+          store.setOfflineMode(true);
+          store.setShowOfflineBanner(true);
+          
+          // Add pending API call if specified
+          if (options.operationType && options.payload) {
+            store.addPendingApiCall(options.operationType, options.payload);
+          }
+        }
+        
+        // If fallback is enabled, return a default offline response
+        if (options.fallbackToOffline) {
+          return { error: { code: 'OFFLINE', message: 'Operating in offline mode' } } as T;
+        }
+      }
+    }
+    
+    return result;
+  } catch (error) {
+    const classification = classifyError(error);
+    
+    if (classification.offlineWorthy && draftStore) {
+      const store = draftStore.getState();
+      
+      // Only set offline mode if not already offline
+      if (!store.isOfflineMode) {
+        store.setOfflineMode(true);
+        store.setShowOfflineBanner(true);
+        
+        // Add pending API call if specified
+        if (options.operationType && options.payload) {
+          store.addPendingApiCall(options.operationType, options.payload);
+        }
+      }
+      
+      // If fallback is enabled, return a default offline response
+      if (options.fallbackToOffline) {
+        return { error: { code: 'OFFLINE', message: 'Operating in offline mode' } } as T;
+      }
+    }
+    
+    // Re-throw non-offline-worthy errors
+    throw error;
+  }
+}
+
 // Existing function - fetch initial player data
 export async function fetchPlayers(): Promise<Player[]> {
   const controller = new AbortController();
@@ -128,6 +211,15 @@ export async function marcoPingBlocking(): Promise<{ answer: string; upstreamSta
   return { answer: resp.answer ?? '', upstreamStatus: resp.upstreamStatus ?? 0, duration_ms: resp.duration_ms ?? 0 };
 }
 
+// Marco/Polo reconnection mechanism
+export async function pingMarco(): Promise<boolean> {
+  try {
+    const res = await blockingFetch('/draft/marco', { user: getUserId() }, 15_000);
+    const ans = (res?.answer ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    return res?.ok === true && ans === 'Polo!';
+  } catch { return false; }
+}
+
 // Initialize draft - does NOT send conversationId on first call
 export async function initializeDraftBlocking(params: {
   numTeams: number;
@@ -148,14 +240,22 @@ export async function initializeDraftBlocking(params: {
     console.warn('[PAYLOAD][WARN] /draft/initialize bytes', { bytes, players: playerCount });
   }
 
-  const res = await blockingFetch('/draft/initialize', body, 300000); // 300s timeout
-  
-  // Ensure conversationId persistence after successful response
-  if (res?.conversationId) {
-    localStorage.setItem('app.draft.conversationId', String(res.conversationId));
-  }
-  
-  return res;
+  return withOfflineDetection(
+    async () => {
+      const res = await blockingFetch('/draft/initialize', body, 300000); // 300s timeout
+      
+      // Ensure conversationId persistence after successful response
+      if (res?.conversationId) {
+        localStorage.setItem('app.draft.conversationId', String(res.conversationId));
+      }
+      
+      return res;
+    },
+    {
+      operationType: 'initializeDraft',
+      payload: params
+    }
+  );
 }
 
 // Reset draft
@@ -185,7 +285,23 @@ export async function playerTakenBlocking(params: {
     pick: params.payload.pick
   };
   
-  return blockingFetch('/draft/player-taken', flattenedPayload, 60000); // 60s timeout for ACK operation
+  // Add byte size preflight checks
+  const bytes = bytesOf(flattenedPayload);
+  const playerName = params.payload.player?.name || 'Unknown';
+
+  if (bytes >= 300_000) {
+    console.error('[PAYLOAD][ALERT] /draft/player-taken bytes', { bytes, player: playerName, round: params.payload.round, pick: params.payload.pick });
+  } else if (bytes >= 150_000) {
+    console.warn('[PAYLOAD][WARN] /draft/player-taken bytes', { bytes, player: playerName, round: params.payload.round, pick: params.payload.pick });
+  }
+  
+  return withOfflineDetection(
+    async () => blockingFetch('/draft/player-taken', flattenedPayload, 60000), // 60s timeout for ACK operation
+    {
+      operationType: 'playerTaken',
+      payload: params
+    }
+  );
 }
 
 // Player drafted notification
@@ -234,12 +350,20 @@ export async function userTurnBlocking(params: {
     console.warn('[PAYLOAD][WARN] /draft/user-turn bytes', { bytes, players: playerCount });
   }
 
-  const res = await blockingFetch('/draft/user-turn', params, 90000); // 90s timeout for user-turn operation
-  
-  // Ensure conversationId persistence after successful response
-  if (res?.conversationId) {
-    localStorage.setItem('app.draft.conversationId', String(res.conversationId));
-  }
-  
-  return res;
+  return withOfflineDetection(
+    async () => {
+      const res = await blockingFetch('/draft/user-turn', params, 90000); // 90s timeout for user-turn operation
+      
+      // Ensure conversationId persistence after successful response
+      if (res?.conversationId) {
+        localStorage.setItem('app.draft.conversationId', String(res.conversationId));
+      }
+      
+      return res;
+    },
+    {
+      operationType: 'userTurn',
+      payload: params
+    }
+  );
 }
