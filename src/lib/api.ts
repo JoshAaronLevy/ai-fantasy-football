@@ -189,7 +189,7 @@ export async function playerTakenBlocking(params: {
 }
 
 // Player drafted notification
-export async function playerDraftedBlocking(params: {
+export async function userDraftedBlocking(params: {
   user: string;
   conversationId: string;
   payload: {
@@ -198,7 +198,16 @@ export async function playerDraftedBlocking(params: {
     player: MinimalPickPlayer;
   };
 }): Promise<any> {
-  return blockingFetch('/draft/player-drafted', params, 60000); // 60s timeout for ACK operation
+  // FIX: Flatten the payload structure as backend expects player, round, pick, conversationId at top level
+  const flattenedPayload = {
+    user: params.user,
+    conversationId: params.conversationId,
+    player: params.payload.player,
+    round: params.payload.round,
+    pick: params.payload.pick
+  };
+  
+  return blockingFetch('/draft/user-drafted', flattenedPayload, 60000); // 60s timeout for ACK operation
 }
 
 // User turn analysis

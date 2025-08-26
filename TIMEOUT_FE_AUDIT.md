@@ -72,7 +72,7 @@ The audit discovered timeout implementations in the following files:
 - **Rationale:** Player taken is an acknowledgment operation with improved reliability
 
 ### 6. Player Drafted Acknowledgment
-**Function:** [`playerDraftedBlocking()`](src/lib/api.ts:156)
+**Function:** [`userDraftedBlocking()`](src/lib/api.ts:156)
 - **Before:** 30,000ms (30 seconds)
 - **After:** 60,000ms (60 seconds)
 - **Rationale:** Player drafted is an acknowledgment operation with improved reliability
@@ -97,7 +97,7 @@ The following standardized timeout values are now implemented across the fronten
 - [`marcoPingBlocking()`](src/lib/api.ts:116) - Health check ping
 - [`resetBlocking()`](src/lib/api.ts:135) - Draft reset acknowledgment
 - [`playerTakenBlocking()`](src/lib/api.ts:143) - Player taken acknowledgment
-- [`playerDraftedBlocking()`](src/lib/api.ts:156) - Player drafted acknowledgment
+- [`userDraftedBlocking()`](src/lib/api.ts:156) - Player drafted acknowledgment
 
 ### Standard Operations: 60,000ms (60 seconds) ✓
 - [`fetchPlayers()`](src/lib/api.ts:92) - Initial player data fetch

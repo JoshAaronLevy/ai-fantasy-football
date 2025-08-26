@@ -3,7 +3,7 @@
  * Slim player types and builders for minimal payloads
  * 
  * Usage rules:
- * - For /player-taken and /player-drafted: use toMinimalPickPlayer for minimal subset
+ * - For /player-taken and /user-drafted: use toMinimalPickPlayer for minimal subset
  * - For /user-turn and /initialize: lists must be ≤ 25 players; use mapToSlimTopN or slice accordingly
  */
 
@@ -51,7 +51,7 @@ export function toSlimPlayer(p: any): SlimPlayer {
 }
 
 /**
- * Build minimal pick payload from SlimPlayer (for /player-taken, /player-drafted)
+ * Build minimal pick payload from SlimPlayer (for /player-taken, /user-drafted)
  */
 export function toMinimalPickPlayer(p: SlimPlayer) {
   return {

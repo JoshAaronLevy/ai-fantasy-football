@@ -14,7 +14,7 @@ import type { Player } from '../types'
 import { useDraftStore } from '../state/draftStore'
 import { DraftConfigModal } from './DraftConfigModal'
 import { Star, StarOff, TrendingUp, TrendingDown, Minus } from 'lucide-react'
-import { playerTakenBlocking, playerDraftedBlocking, userTurnBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
+import { playerTakenBlocking, userDraftedBlocking, userTurnBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
 import { toMinimalPickFromAny, mapToSlimTopN } from '../lib/players/slim'
 import { getConversationId, getUserId } from '../lib/storage/localStore'
 
@@ -90,14 +90,50 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   // If draft is not configured, use original behavior
   if (!isDraftConfigured()) {
     const handleDraftClick = () => {
-      if (!unavailable) {
-        draftPlayer(data.id);
+      if (!unavailable && !isDrafting && !isTaking) {
+        setIsDrafting(true);
+        try {
+          draftPlayer(data.id);
+          toast.current?.show({
+            severity: 'success',
+            summary: 'Player Drafted',
+            detail: `${data.name} added to your team`,
+            life: 3000
+          });
+        } catch (error) {
+          toast.current?.show({
+            severity: 'error',
+            summary: 'Draft Failed',
+            detail: error instanceof Error ? error.message : 'Unknown error',
+            life: 4000
+          });
+        } finally {
+          setIsDrafting(false);
+        }
       }
     }
 
     const handleTakeClick = () => {
-      if (!unavailable) {
-        takePlayer(data.id);
+      if (!unavailable && !isTaking && !isDrafting) {
+        setIsTaking(true);
+        try {
+          takePlayer(data.id);
+          toast.current?.show({
+            severity: 'info',
+            summary: 'Player Taken',
+            detail: `${data.name} marked as taken`,
+            life: 3000
+          });
+        } catch (error) {
+          toast.current?.show({
+            severity: 'error',
+            summary: 'Mark as Taken Failed',
+            detail: error instanceof Error ? error.message : 'Unknown error',
+            life: 4000
+          });
+        } finally {
+          setIsTaking(false);
+        }
       }
     }
 
@@ -110,29 +146,39 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         justifyContent: 'center'
       }}>
         <Button
-          label={drafted ? 'Drafted' : 'Draft'}
+          label={drafted ? 'Drafted' : isDrafting ? 'Drafting…' : 'Draft'}
           onClick={handleDraftClick}
-          disabled={unavailable}
-          className={unavailable ? 'p-button-secondary' : 'p-button-success'}
+          disabled={unavailable || isDrafting || isTaking}
+          className={unavailable || isDrafting || isTaking ? 'p-button-secondary' : 'p-button-success'}
           size="small"
           style={{
             fontSize: '0.75rem',
             padding: '0.25rem 0.5rem'
           }}
-          tooltip={unavailable ? 'Unavailable' : 'Add to my team'}
+          tooltip={
+            unavailable ? 'Unavailable' :
+            isDrafting ? 'Processing draft...' :
+            isTaking ? 'Taking player...' :
+            'Add to my team'
+          }
           tooltipOptions={{ position: 'top' }}
         />
         <Button
           label={isTaking ? 'Acknowledging…' : 'Taken'}
           onClick={handleTakeClick}
-          disabled={unavailable || isTaking}
-          className={unavailable || isTaking ? 'p-button-secondary' : 'p-button-danger'}
+          disabled={unavailable || isTaking || isDrafting}
+          className={unavailable || isTaking || isDrafting ? 'p-button-secondary' : 'p-button-danger'}
           size="small"
           style={{
             fontSize: '0.75rem',
             padding: '0.25rem 0.5rem'
           }}
-          tooltip={unavailable ? 'Unavailable' : isTaking ? 'Processing...' : 'Mark as taken'}
+          tooltip={
+            unavailable ? 'Unavailable' :
+            isTaking ? 'Processing...' :
+            isDrafting ? 'Drafting player...' :
+            'Mark as taken'
+          }
           tooltipOptions={{ position: 'top' }}
         />
       </div>
@@ -155,11 +201,24 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
       // Build minimal player payload
       const minimal = toMinimalPickFromAny(data);
       
-      // BLOCKING: Send drafted ACK first before updating local state
-      const conversationId = getConversationId('draft');
-      const result = await playerDraftedBlocking({
-        user: getUserId(),
-        conversationId: conversationId || '',
+      // Get conversationId and userId
+      const activeConversationId = conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId');
+      const userId = getUserId() || 'user';
+      
+      if (!activeConversationId) {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Draft Not Initialized',
+          detail: 'Initialize the draft first',
+          life: 3000
+        });
+        return;
+      }
+      
+      // BLOCKING: Send drafted ACK
+      const result = await userDraftedBlocking({
+        user: userId,
+        conversationId: activeConversationId,
         payload: {
           round,
           pick,
@@ -190,6 +249,11 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           summary: ack,
           life: 3000
         });
+      }
+      
+      // After success, re-evaluate isMyTurn and trigger Task 5 if needed
+      if (isMyTurn()) {
+        tryTriggerUserTurnEdgeGuarded?.();
       }
       
     } catch (error) {
