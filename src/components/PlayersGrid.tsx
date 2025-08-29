@@ -1,7 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-import React, { useState } from 'react'
+import React, { useRef, useState, useEffect, useCallback } from 'react'
 import { AgGridReact } from 'ag-grid-react'
-import type { ColDef, ICellRendererParams } from 'ag-grid-community'
+import type { ColDef, ICellRendererParams, SelectionChangedEvent, IRowNode } from 'ag-grid-community'
 import 'ag-grid-community/styles/ag-grid.css'
 import 'ag-grid-community/styles/ag-theme-quartz.css'
 import { Button } from 'primereact/button'
@@ -9,57 +8,150 @@ import { InputText } from 'primereact/inputtext'
 import { Checkbox } from 'primereact/checkbox'
 import { Message } from 'primereact/message'
 import { Toast } from 'primereact/toast'
-
 import type { Player } from '../types'
 import { useDraftStore } from '../state/draftStore'
 import { DraftConfigModal } from './DraftConfigModal'
-import { Star, StarOff, TrendingUp, TrendingDown, Minus } from 'lucide-react'
-import { playerTakenBlocking, userDraftedBlocking, userTurnBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
-import { toMinimalPickFromAny, mapToSlimTopN } from '../lib/players/slim'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { getConversationId, getUserId } from '../lib/storage/localStore'
 import { classifyError } from '../lib/httpErrors'
+import { createPortal } from 'react-dom'
+import { analyzeBlocking } from '../lib/api'
+import { toSlimPlayer } from '../lib/players/slim'
 
-const StarCell: React.FC<ICellRendererParams<Player>> = (params) => {
-  const data = params.data
-  const toggleStar = useDraftStore((s) => s.toggleStar)
-  const isStarred = useDraftStore((s) => s.isStarred)
-  if (!data) return null
+type InfoIconTooltipProps = {
+  reason?: string
+  delayMs?: number
+}
 
-  const starred = isStarred(data.id)
+export const InfoIconTooltip: React.FC<InfoIconTooltipProps> = ({ reason, delayMs = 1000 }) => {
+  const enabled = !!reason
+
+  const anchorRef = useRef<HTMLSpanElement | null>(null)
+  const timerRef = useRef<number | null>(null)
+
+  const [open, setOpen] = useState(false)
+  const [coords, setCoords] = useState<{ left: number; top: number }>({ left: 0, top: 0 })
+
+  const positionTooltip = useCallback(() => {
+    const el = anchorRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    setCoords({ left: rect.left + rect.width / 2, top: rect.bottom + 8 })
+  }, [])
+
+  const onEnter = () => {
+    if (!enabled) return
+    if (timerRef.current) window.clearTimeout(timerRef.current)
+    positionTooltip()
+    timerRef.current = window.setTimeout(() => setOpen(true), delayMs)
+  }
+
+  const onLeave = () => {
+    if (timerRef.current) window.clearTimeout(timerRef.current)
+    setOpen(false)
+  }
+
+  // Hook is called unconditionally; it guards internally
+  useEffect(() => {
+    if (!open) return
+    const onReflow = () => positionTooltip()
+    window.addEventListener('scroll', onReflow, true)
+    window.addEventListener('resize', onReflow)
+    return () => {
+      window.removeEventListener('scroll', onReflow, true)
+      window.removeEventListener('resize', onReflow)
+    }
+  }, [open, positionTooltip])
+
+  // Only decide what to render AFTER hooks have been called
+  if (!enabled) return null
 
   return (
-    <Button
-      onClick={() => toggleStar(data.id)}
-      className="p-button-text p-button-sm"
-      style={{
-        width: '2rem',
-        height: '2rem',
-        padding: 0,
-        backgroundColor: 'transparent',
-        border: 'none',
-        borderRadius: '0.375rem'
-      }}
-      tooltip={starred ? 'Unstar' : 'Star'}
-      tooltipOptions={{ position: 'top' }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'transparent'
-      }}
-    >
-      {starred ? <Star className="w-4 h-4" /> : <StarOff className="w-4 h-4 opacity-70" />}
-    </Button>
+    <>
+      <span
+        ref={anchorRef}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '0.5rem' }}
+      >
+        <FontAwesomeIcon
+          icon="info-circle"
+          className="cursor-help"
+          style={{ width: 16, height: 16, color: '#3D82F6' }}
+          aria-label={reason}
+        />
+      </span>
+
+      {open &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{
+              position: 'fixed',
+              top: coords.top,
+              left: coords.left,
+              transform: 'translateX(-50%)',
+              backgroundColor: '#1f2937',
+              color: '#fff',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '0.375rem',
+              fontSize: '0.875rem',
+              maxWidth: 300,
+              whiteSpace: 'normal',
+              zIndex: 100000,
+              boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)',
+              pointerEvents: 'none',
+            }}
+          >
+            {reason}
+            <div
+              style={{
+                position: 'absolute',
+                top: -4,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                width: 0,
+                height: 0,
+                borderLeft: '4px solid transparent',
+                borderRight: '4px solid transparent',
+                borderBottom: '4px solid #1f2937',
+              }}
+            />
+          </div>,
+          document.body
+        )}
+    </>
   )
+}
+
+// Name with Info Icon Cell
+const NameWithInfoCell: React.FC<ICellRendererParams<Player>> = ({ data }) => {
+  if (!data) return null
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      <span>{data.name}</span>
+      <InfoIconTooltip reason={data.reason} />
+    </div>
+  )
+}
+
+// Simple ID Cell (replaces StarCell)
+const IdCell: React.FC<ICellRendererParams<Player>> = ({ data }) => {
+  if (!data) return null
+  return <span>{data.id}</span>
 }
 
 const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   toast: React.RefObject<Toast | null>;
   onUserTurnTrigger?: () => void;
+  onPlayerAction?: () => void;
 }> = (params) => {
-  const { data, toast } = params
+  const { data, toast, onPlayerAction } = params
   const [isTaking, setIsTaking] = useState(false)
   const [isDrafting, setIsDrafting] = useState(false)
+  const [watchingPlayers, setWatchingPlayers] = useState<Set<string>>(new Set())
+  
   const draftPlayer = useDraftStore((s) => s.draftPlayer)
   const takePlayer = useDraftStore((s) => s.takePlayer)
   const isDrafted = useDraftStore((s) => s.isDrafted)
@@ -83,6 +175,19 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   const drafted = isDrafted(data.id)
   const taken = isTaken(data.id)
   const unavailable = drafted || taken
+  const isWatching = watchingPlayers.has(data.id)
+  
+  const handleWatchClick = () => {
+    setWatchingPlayers(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(data.id)) {
+        newSet.delete(data.id)
+      } else {
+        newSet.add(data.id)
+      }
+      return newSet
+    })
+  }
   
   // If draft is not configured, use original behavior
   if (!isDraftConfigured()) {
@@ -97,6 +202,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
             detail: `${data.name} added to your team`,
             life: 3000
           });
+          // Clear selections after drafting
+          onPlayerAction?.();
         } catch (error) {
           toast.current?.show({
             severity: 'error',
@@ -121,6 +228,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
             detail: `${data.name} marked as taken`,
             life: 3000
           });
+          // Clear selections after marking as taken
+          onPlayerAction?.();
         } catch (error) {
           toast.current?.show({
             severity: 'error',
@@ -150,7 +259,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           size="small"
           style={{
             fontSize: '0.75rem',
-            padding: '0.25rem 0.5rem'
+            padding: '0.25rem 0.5rem',
+            color: '#F1F5F9'
           }}
           tooltip={
             unavailable ? 'Unavailable' :
@@ -161,14 +271,15 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           tooltipOptions={{ position: 'top' }}
         />
         <Button
-          label={isTaking ? 'Acknowledging…' : 'Taken'}
+          label="Taken"
           onClick={handleTakeClick}
           disabled={unavailable || isTaking || isDrafting}
           className={unavailable || isTaking || isDrafting ? 'p-button-secondary' : 'p-button-danger'}
           size="small"
           style={{
             fontSize: '0.75rem',
-            padding: '0.25rem 0.5rem'
+            padding: '0.25rem 0.5rem',
+            color: '#F1F5F9'
           }}
           tooltip={
             unavailable ? 'Unavailable' :
@@ -176,6 +287,19 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
             isDrafting ? 'Drafting player...' :
             'Mark as taken'
           }
+          tooltipOptions={{ position: 'top' }}
+        />
+        <Button
+          label={isWatching ? 'Watching' : 'Watch'}
+          onClick={handleWatchClick}
+          className={isWatching ? 'p-button-secondary' : 'p-button-warning'}
+          size="small"
+          style={{
+            fontSize: '0.75rem',
+            padding: '0.25rem 0.5rem',
+            color: '#F1F5F9'
+          }}
+          tooltip={isWatching ? 'Stop watching this player' : 'Watch this player'}
           tooltipOptions={{ position: 'top' }}
         />
       </div>
@@ -231,7 +355,7 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
       }
       
       // Online mode - attempt API call
-      const minimal = toMinimalPickFromAny(data);
+      // const minimal = toMinimalPickFromAny(data);
       
       if (!activeConversationId) {
         toast.current?.show({
@@ -243,41 +367,22 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         return;
       }
       
-      // BLOCKING: Send drafted ACK
-      const result = await userDraftedBlocking({
-        user: userId,
-        conversationId: activeConversationId,
-        payload: {
-          round,
-          pick,
-          player: minimal
-        }
-      });
-      
-      // Check for error in response
-      if (result?.error) {
-        const errorDetail = formatApiError(result, 'Draft failed')
-        toast.current?.show({
-          severity: 'error',
-          summary: 'Draft Failed',
-          detail: errorDetail,
-          life: 4000
-        });
-        return;
-      }
-      
-      // On success: update roster locally
+      // Local-only operation: update roster locally
       draftPlayer(data.id);
       
-      // Show ACK message if returned (DRAFTED:...)
-      const ack = getTextFromLlmResponse(result) || result?.message || result?.data?.message || '';
-      if (ack && ack.startsWith('DRAFTED:')) {
-        toast.current?.show({
-          severity: 'success',
-          summary: ack,
-          life: 3000
-        });
-      }
+      // Show success message
+      toast.current?.show({
+        severity: 'success',
+        summary: 'Player Drafted',
+        detail: `${data.name} added to your team`,
+        life: 3000
+      });
+      
+      // Clear selections after drafting
+      onPlayerAction?.();
+      
+      // Trigger analyze call if it's now the user's turn
+      // Note: Analyze triggering will be handled by existing turn detection logic
       
     } catch (error) {
       console.error('Draft API error:', error);
@@ -324,6 +429,9 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           detail: `${data.name} added to your team - will sync when reconnected`,
           life: 3000
         });
+        
+        // Clear selections after drafting
+        onPlayerAction?.();
       } else {
         toast.current?.show({
           severity: 'error',
@@ -382,7 +490,7 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
       }
       
       // Online mode - attempt API call
-      const minimal = toMinimalPickFromAny(data);
+      // const minimal = toMinimalPickFromAny(data);
       
       if (!activeConversationId) {
         toast.current?.show({
@@ -394,56 +502,22 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         return;
       }
       
-      // BLOCKING: Send taken ACK
-      const result = await playerTakenBlocking({
-        user: userId,
-        conversationId: activeConversationId,
-        payload: { round, pick, player: minimal }
+      // Local-only operation: update store to mark player as taken
+      takePlayer(data.id);
+      
+      // Show success message
+      toast.current?.show({
+        severity: 'info',
+        summary: 'Player Taken',
+        detail: `${data.name} marked as taken`,
+        life: 3000
       });
       
-      // Check for error in response
-      if (result?.error) {
-        // Special handling for 409 invalid_conversation - session expired
-        if (result.error.code === 409 && result.error.message?.includes('invalid_conversation')) {
-          // Clear conversation ID from localStorage
-          localStorage.removeItem('app.draft.conversationId');
-          
-          // Reset draft to trigger config modal
-          const resetDraft = useDraftStore.getState().resetDraft;
-          resetDraft();
-          
-          toast.current?.show({
-            severity: 'warn',
-            summary: 'Session Expired',
-            detail: 'Please re-initialize your draft.',
-            life: 5000
-          });
-          return;
-        }
-        
-        // Handle other errors normally
-        const errorDetail = formatApiError(result, 'Mark as taken failed')
-        toast.current?.show({
-          severity: 'error',
-          summary: 'Mark as Taken Failed',
-          detail: errorDetail,
-          life: 4000
-        });
-        return;
-      }
+      // Clear selections after marking as taken
+      onPlayerAction?.();
       
-      // On success: update store to mark player as taken
-      const ack = getTextFromLlmResponse(result) || result?.message || result?.data?.message || '';
-      markPlayerTaken(data.id, data, ack || 'Player taken recorded', activeConversationId);
-      
-      // Show ACK message (TAKEN:...)
-      if (ack && ack.startsWith('TAKEN:')) {
-        toast.current?.show({
-          severity: 'info',
-          summary: ack,
-          life: 3000
-        });
-      }
+      // Trigger analyze call if it's now the user's turn
+      // Note: Analyze triggering will be handled by existing turn detection logic
       
     } catch (error) {
       console.error('Take API error:', error);
@@ -490,6 +564,9 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           detail: `${data.name} marked as taken - will sync when reconnected`,
           life: 3000
         });
+        
+        // Clear selections after marking as taken
+        onPlayerAction?.();
       } else {
         toast.current?.show({
           severity: 'error',
@@ -519,7 +596,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         size="small"
         style={{
           fontSize: '0.75rem',
-          padding: '0.25rem 0.5rem'
+          padding: '0.25rem 0.5rem',
+          color: '#F1F5F9'
         }}
         tooltip={
           unavailable ? 'Unavailable' :
@@ -540,7 +618,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         size="small"
         style={{
           fontSize: '0.75rem',
-          padding: '0.25rem 0.5rem'
+          padding: '0.25rem 0.5rem',
+          color: '#F1F5F9'
         }}
         tooltip={
           unavailable ? 'Unavailable' :
@@ -552,72 +631,83 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         }
         tooltipOptions={{ position: 'top' }}
       />
+      
+      <Button
+        label={isWatching ? 'Watching' : 'Watch'}
+        onClick={handleWatchClick}
+        disabled={unavailable}
+        className={unavailable ? 'p-button-secondary' : (isWatching ? 'p-button-secondary' : 'p-button-warning')}
+        size="small"
+        style={{
+          fontSize: '0.75rem',
+          padding: '0.25rem 0.5rem',
+          color: '#F1F5F9'
+        }}
+        tooltip={unavailable ? 'Player is drafted/taken' : (isWatching ? 'Stop watching this player' : 'Watch this player')}
+        tooltipOptions={{ position: 'top' }}
+      />
     </div>
   )
 }
 
-const OverallRankCell: React.FC<ICellRendererParams<Player>> = (params) => {
-  const data = params.data
+const OverallRankCell: React.FC<ICellRendererParams<Player>> = ({ data }) => {
   if (!data) return null
 
-  const newRank = data.newOverallRank
-  const prevRank = data.previousOverallRank
-  
-  // Handle null values
-  if (newRank == null || prevRank == null) {
-    return <span>{newRank}</span>
-  }
-  
-  let icon = null
-  
-  if (newRank < prevRank) {
-    // Lower number = better rank = green up arrow
-    icon = <TrendingUp className="w-3 h-3" />
-  } else if (newRank > prevRank) {
-    // Higher number = worse rank = red down arrow
-    icon = <TrendingDown className="w-3 h-3" />
-  } else {
-    // Same rank = yellow minus
-    icon = <Minus className="w-3 h-3" />
-  }
+  const newRank = data.newOverallRank ?? null
+  const prevRank = data.previousOverallRank ?? null
+
+  if (newRank == null) return null // or show '-' if you prefer
+
+  // Only show delta if we have a previous rank
+  const hasPrev = typeof prevRank === 'number'
+  const diff = hasPrev ? (prevRank! - newRank) : 0 // + = improved, - = worse
+  const color =
+    diff > 0 ? '#22c55e' : diff < 0 ? '#ef4444' : '#eab308'
+
+  // Format to ensure (0) rather than (+0)
+  const formatted = hasPrev
+    ? (diff === 0 ? '0' : diff > 0 ? `+${diff}` : `${diff}`)
+    : ''
 
   return (
     <div className="flex items-center gap-1">
-      <span style={{ marginRight: '3px' }}>{newRank}</span>
-      <span style={{ color: newRank < prevRank ? '#22c55e' : newRank > prevRank ? '#ef4444' : '#eab308', display: 'flex' }}>{icon}</span>
+      <span style={{ marginRight: 3 }}>{newRank}</span>
+      {hasPrev && (
+        <span style={{ color, display: 'flex' }}>
+          ({formatted})
+        </span>
+      )}
     </div>
   )
 }
 
-const PositionRankCell: React.FC<ICellRendererParams<Player>> = (params) => {
-  const data = params.data
+const PositionRankCell: React.FC<ICellRendererParams<Player>> = ({ data }) => {
   if (!data) return null
 
-  const newRank = data.newPositionRank
-  const prevRank = data.previousPositionRank
-  
-  // Handle null values
-  if (newRank == null || prevRank == null) {
-    return <span>{newRank}</span>
-  }
-  
-  let icon = null
-  
-  if (newRank < prevRank) {
-    // Lower number = better rank = green up arrow
-    icon = <TrendingUp className="w-3 h-3" />
-  } else if (newRank > prevRank) {
-    // Higher number = worse rank = red down arrow
-    icon = <TrendingDown className="w-3 h-3" />
-  } else {
-    // Same rank = yellow minus
-    icon = <Minus className="w-3 h-3" />
-  }
+  const newRank = data.newPositionRank ?? null
+  const prevRank = data.previousPositionRank ?? null
+
+  // If we don't even have a new rank, show nothing (or return a dash)
+  if (newRank == null) return null
+
+  const hasPrev = prevRank != null
+  const diff = hasPrev ? (prevRank! - newRank) : 0 // + = improved, - = worse
+  const color =
+    diff > 0 ? '#22c55e' : diff < 0 ? '#ef4444' : '#eab308'
+
+  // Format to ensure (0) rather than (+0)
+  const formatted = hasPrev
+    ? (diff === 0 ? '0' : diff > 0 ? `+${diff}` : `${diff}`)
+    : ''
 
   return (
     <div className="flex items-center gap-1">
-      <span style={{ marginRight: '3px' }}>{newRank}</span>
-      <span style={{ color: newRank < prevRank ? '#22c55e' : newRank > prevRank ? '#ef4444' : '#eab308', display: 'flex' }}>{icon}</span>
+      <span style={{ marginRight: 3 }}>{newRank}</span>
+      {hasPrev && (
+        <span style={{ color, display: 'flex' }}>
+          ({formatted})
+        </span>
+      )}
     </div>
   )
 }
@@ -693,7 +783,9 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   const taken = useDraftStore((s) => s.taken)
 
   const [quickFilter, setQuickFilter] = React.useState('')
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [showStarredOnly, setShowStarredOnly] = React.useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [animateRound, setAnimateRound] = React.useState(false)
   const [prevRound, setPrevRound] = React.useState(currentRound)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -702,155 +794,22 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   const [prevIsMyTurn, setPrevIsMyTurn] = React.useState(false)
   const [prevPicksUntilTurn, setPrevPicksUntilTurn] = React.useState(0)
   const [hidingPlayerIds, setHidingPlayerIds] = React.useState<Set<string>>(new Set())
-  const lastTurnKeyRef = React.useRef<string | null>(null) // Guard against wheel double-calls
+  const [selectedPlayers, setSelectedPlayers] = React.useState<Player[]>([])
+  const [isAnalyzing, setIsAnalyzing] = React.useState(false)
+  const [analysisComplete, setAnalysisComplete] = React.useState(false)
+  const [lastAnalyzedPlayerIds, setLastAnalyzedPlayerIds] = React.useState<string[]>([])
   const draftConfig = useDraftStore((s) => s.draftConfig)
   const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
   const hideDraftedPlayers = useDraftStore((s) => s.hideDraftedPlayers)
   const toggleHideDraftedPlayers = useDraftStore((s) => s.toggleHideDraftedPlayers)
+  const addConversationMessage = useDraftStore((s) => s.addConversationMessage)
   
-  // Additional selectors for user-turn payload
+  // Selectors for turn detection
   const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
   const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
-  const myTeam = useDraftStore((s) => s.myTeam)
-  const players = useDraftStore((s) => s.players)
-  const addConversationMessage = useDraftStore((s) => s.addConversationMessage)
-  const conversationId = useDraftStore((s) => s.conversationId)
   
 
-  // Task 5: User turn trigger with wheel guard - wrapped with useCallback to prevent unnecessary re-renders
-  const tryTriggerUserTurnEdgeGuarded = React.useCallback(async () => {
-    const round = getCurrentRound();
-    const pick = getCurrentPick();
-    const turnKey = `${round}:${pick}`;
-    
-    // Wheel guard: skip if same turn key
-    if (turnKey === lastTurnKeyRef.current) {
-      console.debug('User-turn analysis already triggered for', turnKey);
-      return;
-    }
-    
-    const activeConversationId = conversationId || getConversationId('draft');
-    
-    // Guard: conversationId must exist
-    if (!activeConversationId) {
-      console.debug('No conversationId, skipping user-turn analysis');
-      return;
-    }
-    
-    // Guard: must be configured
-    if (!isDraftConfigured()) {
-      console.debug('Draft not configured, skipping user-turn analysis');
-      return;
-    }
-    
-    const userId = getUserId() || 'user';
-    const numTeams = draftConfig.teams || 6;
-    const slot = draftConfig.pick || 1;
-    
-    try {
-      // Show loading indicator
-      toast.current?.show({
-        severity: 'info',
-        summary: 'Getting recommendations...',
-        detail: 'AI is analyzing your turn',
-        life: 0 // Keep until response
-      });
-      
-      // Build current roster as slim players
-      const slimRoster = players
-        .filter(p => myTeam[p.id])
-        .map(p => toMinimalPickFromAny(p));
-      
-      // Get available players (top 25) using mapToSlimTopN
-      const availablePlayers = players.filter(p => !isDrafted(p.id) && !isTaken(p.id));
-      const availablePlayers25 = mapToSlimTopN(availablePlayers, 25);
-      
-      console.debug('Triggering user-turn analysis for', turnKey);
-      
-      const result = await userTurnBlocking({
-        user: userId,
-        conversationId: activeConversationId,
-        payload: {
-          round,
-          pick,
-          userRoster: slimRoster,
-          availablePlayers: availablePlayers25,
-          leagueSize: numTeams,
-          pickSlot: slot
-        }
-      });
-      
-      // Clear loading toast
-      toast.current?.clear();
-      
-      // Check for error in response
-      if (result?.error) {
-        // Special handling for 409 invalid_conversation - session expired
-        if (result.error.code === 409 && result.error.message?.includes('invalid_conversation')) {
-          // Clear conversation ID from localStorage
-          localStorage.removeItem('app.draft.conversationId');
-          
-          // Reset draft to trigger config modal
-          const resetDraft = useDraftStore.getState().resetDraft;
-          resetDraft();
-          
-          toast.current?.show({
-            severity: 'warn',
-            summary: 'Session Expired',
-            detail: 'Please re-initialize your draft.',
-            life: 5000
-          });
-          return;
-        }
-        
-        // Handle other errors normally (offline detection already handled by withOfflineDetection)
-        const errorDetail = formatApiError(result, 'Analysis failed')
-        toast.current?.show({
-          severity: 'error',
-          summary: 'Analysis Failed',
-          detail: errorDetail,
-          life: 4000
-        });
-        return;
-      }
-      
-      // Normalize text via getTextFromLlmResponse
-      const text = getTextFromLlmResponse(result);
-      
-      // Push a message as 'analysis' type with meta
-      addConversationMessage({
-        id: `user-turn-analysis-${Date.now()}`,
-        type: 'analysis',
-        content: text,
-        timestamp: Date.now(),
-        meta: { round, pick }
-      });
-      
-      // Update wheel guard on success
-      lastTurnKeyRef.current = turnKey;
-      
-      toast.current?.show({
-        severity: 'success',
-        summary: 'Recommendations ready',
-        detail: 'Check the analysis drawer for insights',
-        life: 3000
-      });
-      
-    } catch (error) {
-      console.error('User-turn analysis failed:', error);
-      
-      // Clear loading toast
-      toast.current?.clear();
-      
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      toast.current?.show({
-        severity: 'error',
-        summary: 'Analysis failed',
-        detail: errorMessage,
-        life: 4000
-      });
-    }
-  }, [getCurrentRound, getCurrentPick, conversationId, isDraftConfigured, draftConfig.teams, draftConfig.pick, players, myTeam, isDrafted, isTaken, addConversationMessage, toast])
+  // NOTE: Automatic user turn analysis function removed. Manual AI Assistant still available via Header button.
 
   // Handle round change animation
   React.useEffect(() => {
@@ -892,8 +851,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
         className: 'top-right-toast'
       })
       
-      // Trigger user-turn analysis with wheel guard
-      tryTriggerUserTurnEdgeGuarded();
+      // NOTE: Automatic AI analysis removed - manual AI Assistant button still available
     }
 
     // Clear turn toasts when I've drafted (no longer my turn after drafting)
@@ -903,7 +861,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
 
     setPrevIsMyTurn(currentIsMyTurn)
     setPrevPicksUntilTurn(currentPicksUntilTurn)
-  }, [currentIsMyTurn, currentPicksUntilTurn, prevIsMyTurn, prevPicksUntilTurn, isDraftConfigured, tryTriggerUserTurnEdgeGuarded])
+  }, [currentIsMyTurn, currentPicksUntilTurn, prevIsMyTurn, prevPicksUntilTurn, isDraftConfigured, toast])
 
   // Force AG Grid to refresh when state changes
   React.useEffect(() => {
@@ -968,38 +926,215 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
       // If hideDraftedPlayers is enabled, filter out players that are being hidden
       if (hideDraftedPlayers && hidingPlayerIds.has(p.id)) return false
       
-      // If hideDraftedPlayers is disabled, show all players (including drafted/taken)
-      // This allows drafted/taken players to remain visible with disabled buttons
-      
       if (showStarredOnly && !isStarred(p.id)) return false
       return true
     })
   }, [data, isStarred, showStarredOnly, hideDraftedPlayers, hidingPlayerIds])
 
   const colDefs = React.useMemo<ColDef<Player>[]>(() => [
-    { headerName: '★', width: 70, cellRenderer: StarCell, suppressHeaderMenuButton: true, sortable: false, filter: false },
-    { headerName: 'Name', field: 'name', flex: 1, minWidth: 180, filter: true },
+    {
+      headerName: '',
+      width: 50,
+      checkboxSelection: true,
+      headerCheckboxSelection: true,
+      suppressHeaderMenuButton: true,
+      sortable: false,
+      filter: false,
+      pinned: 'left',
+      checkboxSelectionCallback: (params: { data: Player | null }) => {
+        // Disable checkbox if player is drafted or taken
+        const playerId = params.data?.id;
+        if (!playerId) return false;
+        return !isDrafted(playerId) && !isTaken(playerId);
+      }
+    },
+    { headerName: '#', width: 70, cellRenderer: IdCell, suppressHeaderMenuButton: true, sortable: false, filter: false },
+    { headerName: 'Name', field: 'name', flex: 1, minWidth: 180, filter: true, cellRenderer: NameWithInfoCell },
     { headerName: 'Pos', field: 'position', width: 90, filter: true },
     { headerName: 'Team', field: 'team.abbr', width: 90, filter: true, cellRenderer: TeamLogoCell },
-    { headerName: 'Ovr (new)', field: 'newOverallRank', width: 110, filter: 'agNumberColumnFilter', cellRenderer: OverallRankCell },
-    { headerName: 'Ovr (prev)', field: 'previousOverallRank', width: 110, filter: 'agNumberColumnFilter' },
-    { headerName: 'Pos (new)', field: 'newPositionRank', width: 110, filter: 'agNumberColumnFilter', cellRenderer: PositionRankCell },
-    { headerName: 'Pos (prev)', field: 'previousPositionRank', width: 110, filter: 'agNumberColumnFilter' },
+    { headerName: 'Ovr Rank', field: 'newOverallRank', width: 110, filter: 'agNumberColumnFilter', cellRenderer: OverallRankCell },
+    { headerName: 'Pos Rank', field: 'newPositionRank', width: 110, filter: 'agNumberColumnFilter', cellRenderer: PositionRankCell },
     { headerName: 'Exp Rd', field: 'expectedRound', width: 100, filter: 'agNumberColumnFilter' },
     { headerName: 'Bye', field: 'byeWeek', width: 90, filter: 'agNumberColumnFilter' },
     { headerName: 'Yrs', field: 'yearsPro', width: 90, filter: 'agNumberColumnFilter' },
-    { headerName: 'Role', field: 'role', width: 140, filter: true },
     { headerName: 'Comp', field: 'competitionLevel', width: 120, filter: true },
     {
       headerName: 'Actions',
-      width: 160,
-      cellRenderer: (params: ICellRendererParams<Player>) => <ActionButtonsCell {...params} toast={toast} onUserTurnTrigger={tryTriggerUserTurnEdgeGuarded} />,
+      width: 200,
+      cellRenderer: (params: ICellRendererParams<Player>) => <ActionButtonsCell {...params} toast={toast} onPlayerAction={clearSelections} />,
       sortable: false,
       filter: false,
       suppressHeaderMenuButton: true,
       pinned: 'right'
     },
-  ], [toast])
+  ], [toast, isDrafted, isTaken])
+
+  // Handle selection changes
+  const handleSelectionChanged = React.useCallback((event: SelectionChangedEvent) => {
+    const selectedNodes = event.api.getSelectedNodes()
+    const selectedData = selectedNodes.map((node: IRowNode) => node.data).filter((data): data is Player => data != null)
+    setSelectedPlayers(selectedData)
+    
+    // Reset analysis complete state when selections change after analysis
+    if (analysisComplete && selectedData.length > 0) {
+      const currentPlayerIds = selectedData.map(p => p.id).sort()
+      const lastPlayerIds = lastAnalyzedPlayerIds.sort()
+      const hasChanged = currentPlayerIds.length !== lastPlayerIds.length ||
+                        currentPlayerIds.some((id, index) => id !== lastPlayerIds[index])
+      if (hasChanged) {
+        setAnalysisComplete(false)
+      }
+    }
+  }, [analysisComplete, lastAnalyzedPlayerIds])
+
+  // Generate dynamic button text based on selection and state
+  const getAnalyzeButtonText = React.useCallback(() => {
+    const count = selectedPlayers.length
+    
+    if (isAnalyzing) {
+      return count === 0 ? 'Analyzing 25 Players' : `Analyzing ${count} Players`
+    }
+    
+    if (analysisComplete) {
+      return count === 0 ? 'Analysis Complete for 25 Players' : `Analysis Complete for ${count} Players`
+    }
+    
+    if (count === 0) {
+      return 'Analyze Top 25 Players'
+    } else if (count === 1) {
+      return 'Select At Least 2 Players'
+    } else {
+      return `Analyze ${count} Selected Players`
+    }
+  }, [selectedPlayers.length, isAnalyzing, analysisComplete])
+
+  // Check if analyze button should be disabled
+  const isAnalyzeButtonDisabled = React.useCallback(() => {
+    return selectedPlayers.length === 1 || isAnalyzing || (analysisComplete && !hasSelectionsChangedAfterAnalysis())
+  }, [selectedPlayers.length, isAnalyzing, analysisComplete])
+  
+  // Check if selections have changed after analysis
+  const hasSelectionsChangedAfterAnalysis = React.useCallback(() => {
+    if (!analysisComplete) return false
+    const currentPlayerIds = selectedPlayers.map(p => p.id).sort()
+    const lastPlayerIds = lastAnalyzedPlayerIds.sort()
+    return currentPlayerIds.length !== lastPlayerIds.length ||
+           currentPlayerIds.some((id, index) => id !== lastPlayerIds[index])
+  }, [selectedPlayers, lastAnalyzedPlayerIds, analysisComplete])
+
+  // Function to clear all selections
+  const clearSelections = React.useCallback(() => {
+    if (gridApi) {
+      gridApi.deselectAll()
+      setSelectedPlayers([])
+      // Reset analysis state when selections are cleared
+      setAnalysisComplete(false)
+      setLastAnalyzedPlayerIds([])
+    }
+  }, [gridApi])
+
+  // Handle analyze button click
+  const handleAnalyzeClick = React.useCallback(async () => {
+    if (isAnalyzing) return
+    
+    setIsAnalyzing(true)
+    setAnalysisComplete(false)
+    
+    try {
+      // Determine which players to analyze
+      const playersToAnalyze = selectedPlayers.length >= 2 ? selectedPlayers : filteredData.slice(0, 25)
+      const currentRound = getCurrentRound()
+      const currentPick = getCurrentPick()
+      const conversationId = useDraftStore.getState().conversationId || getConversationId('draft') || localStorage.getItem('app.draft.conversationId')
+      
+      if (!conversationId) {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Analysis Failed',
+          detail: 'Draft conversation not initialized',
+          life: 4000
+        })
+        return
+      }
+      
+      // Get current roster (drafted players)
+      const roster = data?.filter(p => isDrafted(p.id)) || []
+      
+      // Get available players (not drafted and not taken)
+      const availablePlayers = playersToAnalyze.filter(p => !isDrafted(p.id) && !isTaken(p.id))
+      
+      // Convert to SlimPlayer format
+      const rosterSlim = roster.map(toSlimPlayer)
+      const availableSlim = availablePlayers.map(toSlimPlayer)
+      
+      // Create payload
+      const payload = {
+        conversationId,
+        round: currentRound || 1,
+        pick: currentPick || 1,
+        roster: rosterSlim,
+        availablePlayers: availableSlim,
+        leagueSize: draftConfig.teams || 12,
+        pickSlot: draftConfig.pick || 1
+      }
+      
+      // Log full payload before API call
+      console.log('🚀 [ANALYZE] Full payload before API call:', payload)
+      
+      const response = await analyzeBlocking(payload)
+      
+      // Log when response returns
+      console.log('✅ [ANALYZE] Response received:', response)
+      
+      if (response?.error) {
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Analysis Failed',
+          detail: response.error.message || 'Analysis request failed',
+          life: 4000
+        })
+      } else {
+        // Analysis completed successfully
+        setAnalysisComplete(true)
+        setLastAnalyzedPlayerIds(playersToAnalyze.map(p => p.id))
+        
+        // Add the analysis result to conversation messages
+        const analysisContent = response?.content || response?.answer || response?.data?.content || response?.data?.answer || 'Analysis completed successfully'
+        
+        addConversationMessage({
+          id: Date.now().toString(),
+          type: 'analysis',
+          content: analysisContent,
+          timestamp: Date.now(),
+          round: currentRound || 1,
+          pick: currentPick || 1,
+          meta: {
+            round: currentRound || 1,
+            pick: currentPick || 1,
+            playerCount: playersToAnalyze.length
+          }
+        })
+        
+        toast.current?.show({
+          severity: 'success',
+          summary: 'Analysis Complete',
+          detail: `Successfully analyzed ${playersToAnalyze.length} players`,
+          life: 3000
+        })
+      }
+      
+    } catch (error) {
+      console.error('Analysis error:', error)
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Analysis Failed',
+        detail: error instanceof Error ? error.message : 'Unknown error occurred',
+        life: 4000
+      })
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }, [isAnalyzing, selectedPlayers, filteredData, getCurrentRound, getCurrentPick, data, draftConfig.teams, draftConfig.pick, toast, isDrafted, isTaken, addConversationMessage])
 
   return (
     <section className="space-y-4">
@@ -1053,9 +1188,9 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
           alignItems: 'center',
           gap: '1rem'
         }}>
-          {/* Round Indicator */}
+
+          {/* Current Pick Indicator */}
           <div
-            className={animateRound ? 'round-indicator-animate' : 'round-indicator'}
             style={{
               backgroundColor: '#f1f5f9',
               borderColor: '#cbd5e1',
@@ -1065,21 +1200,22 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
               fontSize: '0.875rem',
               fontWeight: '600',
               color: '#475569',
-              position: 'relative',
-              overflow: 'hidden',
-              minWidth: '80px',
-              textAlign: 'center'
+              marginLeft: '0.5rem'
             }}
+            aria-label="Current draft pick information"
           >
-            <span
-              key={currentRound}
-              className={animateRound ? 'round-number-animate' : 'round-number'}
-              style={{
-                display: 'inline-block'
-              }}
-            >
-              Round {currentRound}
-            </span>
+            {(() => {
+              const overallPick = getCurrentPick();
+              const round = getCurrentRound();
+              const teams = draftConfig.teams;
+              
+              if (teams && overallPick && round) {
+                const pickInRound = ((overallPick - 1) % teams) + 1;
+                return `Round #${round} - Pick #${pickInRound} (#${overallPick} Overall)`;
+              } else {
+                return 'Round #— | Overall #—';
+              }
+            })()}
           </div>
 
           {/* Draft Configuration Display */}
@@ -1097,9 +1233,9 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
                 fontSize: '0.875rem',
                 color: '#475569'
               }}>
-                {draftConfig.teams} Teams, Pick {draftConfig.pick}
+                {draftConfig.teams} Teams; Pick #{draftConfig.pick}
               </div>
-              <Button
+              {/* <Button
                 label="Update Setup"
                 onClick={() => setShowConfigModal(true)}
                 className="p-button-outlined p-button-sm"
@@ -1108,7 +1244,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
                   fontSize: '0.75rem',
                   padding: '0.25rem 0.5rem'
                 }}
-              />
+              /> */}
             </div>
           ) : (
             <Button
@@ -1131,7 +1267,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
                 text={`Error: ${error || 'Unknown error'}`}
                 style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
               />
-            ) : `${filteredData.length} available`}
+            ) : null}
           </div>
         </div>
         <div style={{
@@ -1156,11 +1292,11 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '1rem',
+            gap: '0.5rem',
             fontSize: '0.875rem',
             color: '#374151'
           }}>
-            <div style={{
+            {/* <div style={{
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem'
@@ -1171,7 +1307,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
                 onChange={(e) => setShowStarredOnly(e.checked || false)}
               />
               <label htmlFor="starred-only">Show starred only</label>
-            </div>
+            </div> */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -1185,6 +1321,29 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
               <label htmlFor="hide-drafted">Hide drafted players</label>
             </div>
           </div>
+          {/* Analyze Button - moved to same row */}
+          <Button
+            label={getAnalyzeButtonText()}
+            icon={isAnalyzing ? "pi pi-spin pi-spinner" : "pi pi-chart-line"}
+            onClick={handleAnalyzeClick}
+            disabled={isAnalyzeButtonDisabled()}
+            className={isAnalyzeButtonDisabled() ? "p-button-secondary" : (analysisComplete ? "p-button-success" : "p-button-primary")}
+            style={{
+              backgroundColor: isAnalyzeButtonDisabled() ? '#6b7280' : (analysisComplete ? '#22c55e' : '#3b82f6'),
+              borderColor: isAnalyzeButtonDisabled() ? '#6b7280' : (analysisComplete ? '#22c55e' : '#3b82f6'),
+              color: '#ffffff',
+              fontSize: '0.875rem',
+              padding: '0.5rem 1rem',
+              fontWeight: '600'
+            }}
+            tooltip={
+              isAnalyzing ? "Analysis in progress..." :
+              analysisComplete ? "Analysis completed successfully" :
+              isAnalyzeButtonDisabled() ? "Select at least 2 players to analyze" :
+              "Analyze selected players or top 25 if none selected"
+            }
+            tooltipOptions={{ position: 'top' }}
+          />
         </div>
       </div>
 
@@ -1211,6 +1370,11 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
           paginationPageSizeSelector={[20, 25, 50, 100]}
           theme="legacy"
           animateRows
+          rowSelection="multiple"
+          isRowSelectable={(rowNode) => {
+            return rowNode.data ? !isDrafted(rowNode.data.id) && !isTaken(rowNode.data.id) : false;
+          }}
+          onSelectionChanged={handleSelectionChanged}
           onGridReady={(params) => {
             setGridApi(params.api);
           }}

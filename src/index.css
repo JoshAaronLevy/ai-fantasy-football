@@ -231,9 +231,10 @@ body {
 
 /* Custom header styling */
 .custom-header {
-  background: linear-gradient(to right, #3b82f6, #8b5cf6, #ec4899);
+  background: linear-gradient(to right, #002244, #0073CF);
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.1);
+  min-height: 80px !important;
 }
 
 .custom-main {
@@ -411,10 +412,11 @@ body {
 }
 
 .ai-analysis-sidebar .p-sidebar-header {
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6) !important;
+  background: linear-gradient(to right, #002244, #0073CF, #FFB612);
   color: white !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
   padding: 1rem 1.5rem !important;
+  min-height: 80px !important;
 }
 
 .ai-analysis-sidebar .p-sidebar-header .p-sidebar-header-content {

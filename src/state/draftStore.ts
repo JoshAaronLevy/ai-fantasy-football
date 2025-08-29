@@ -32,6 +32,7 @@ type DraftState = {
   conversationMessages: ConversationMessage[];
   isApiLoading: boolean;
   isInitializingDraft: boolean;
+  isAnalysisLoading: boolean; // New shared state for both initialize and analyze operations
   aiAnswer: string;
   
 
@@ -80,6 +81,7 @@ type DraftState = {
   addConversationMessage: (message: ConversationMessage) => void;
   setApiLoading: (loading: boolean) => void;
   setIsInitializingDraft: (loading: boolean) => void;
+  setAnalysisLoading: (loading: boolean) => void;
   markPlayerTaken: (playerId: string, player: Player, confirmation: string, newConversationId?: string) => void;
   markUserTurn: (playerId: string, player: Player, analysis: string, round: number, pick: number, newConversationId?: string) => void;
   setAiAnswer: (answer: string) => void;
@@ -148,6 +150,7 @@ export const useDraftStore = create<DraftState>()(
       conversationMessages: [],
       isApiLoading: false,
       isInitializingDraft: false,
+      isAnalysisLoading: false,
       aiAnswer: '',
       
 
@@ -322,6 +325,7 @@ export const useDraftStore = create<DraftState>()(
         conversationMessages: [],
         isApiLoading: false,
         isInitializingDraft: false,
+        isAnalysisLoading: false,
         aiAnswer: '',
         // Reset offline mode state so fresh draft attempts use online mode first
         isOfflineMode: false,
@@ -391,6 +395,8 @@ export const useDraftStore = create<DraftState>()(
       setApiLoading: (isApiLoading) => set({ isApiLoading }),
       
       setIsInitializingDraft: (isInitializingDraft) => set({ isInitializingDraft }),
+      
+      setAnalysisLoading: (isAnalysisLoading) => set({ isAnalysisLoading }),
       
       setAiAnswer: (answer) => set({ aiAnswer: answer }),
       

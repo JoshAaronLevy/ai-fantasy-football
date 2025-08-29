@@ -31,9 +31,9 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     isOfflineMode,
     setOfflineMode,
     setShowOfflineBanner,
-    addPendingApiCall,
     initializeDraftOffline,
-    setAiAnswer
+    setAiAnswer,
+    setAnalysisLoading
   } = useDraftStore()
   
   const [selectedTeams, setSelectedTeams] = React.useState<number | null>(draftConfig.teams)
@@ -117,6 +117,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
     }
 
     setIsInitializing(true)
+    setAnalysisLoading(true)
     setError(null)
     setShowRetryCompactOptions(false)
 
@@ -133,6 +134,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         onDraftInitialized?.()
       } finally {
         setIsInitializing(false)
+        setAnalysisLoading(false)
       }
       return
     }
@@ -148,6 +150,9 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       players: slimmedRoster,
       ...(isCompactRetry && { compact: true, inputs: { mode: 'compact' } })
     }
+
+    // Close modal immediately for better UX
+    onHide()
 
     try {
       const data = await initializeDraftBlocking(payload)
@@ -186,7 +191,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
         life: 3000
       })
 
-      onHide()
       onDraftInitialized?.()
     } catch (e: unknown) {
       const status = extractErrorStatus(e)
@@ -220,7 +224,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
           
           // Initialize offline and close modal
           initializeDraftOffline(config)
-          onHide()
           onDraftInitialized?.()
         } else {
           // For initial failures, show retry compact options and close modal
@@ -234,7 +237,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
             detail: 'Connection issue — switched to Offline Mode.',
             life: 5000
           })
-          onHide() // Close modal immediately
+          // Modal already closed at start of try block
         }
       } else {
         // Non-offline-worthy errors: keep modal open and show inline error
@@ -242,6 +245,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       }
     } finally {
       setIsInitializing(false)
+      setAnalysisLoading(false)
     }
   }
 

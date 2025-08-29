@@ -5,10 +5,17 @@ import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
 import App from './App.tsx'
 import './index.css'
 
+// FontAwesome configuration
+import { library } from '@fortawesome/fontawesome-svg-core'
+import { faCircleInfo } from '@fortawesome/free-solid-svg-icons'
+
 // PrimeReact CSS imports (needed for existing components)
-import 'primereact/resources/themes/lara-dark-blue/theme.css'
+import 'primereact/resources/themes/lara-light-blue/theme.css'
 import 'primereact/resources/primereact.min.css'
 import 'primeicons/primeicons.css'
+
+// Add FontAwesome icons to library
+library.add(faCircleInfo)
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule])

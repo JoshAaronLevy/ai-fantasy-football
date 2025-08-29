@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Player } from '../types'
+import type { SlimPlayer } from './players/slim'
 import { getUserId } from './storage/localStore'
 import { bytesOf } from './bytes'
 import { classifyError } from './httpErrors'
@@ -366,4 +367,99 @@ export async function userTurnBlocking(params: {
       payload: params
     }
   );
+}
+
+/**
+ * Analyze the current draft situation using the new /draft/analyze endpoint
+ * @param params - Draft analysis parameters
+ * @returns Promise resolving to analysis response
+ */
+export async function analyzeBlocking(params: {
+  conversationId: string;
+  round: number;
+  pick: number;
+  roster: SlimPlayer[];
+  availablePlayers: SlimPlayer[];
+  leagueSize?: number;
+  pickSlot?: number;
+}): Promise<any> {
+  const body = {
+    user: getUserId(),
+    conversationId: params.conversationId,
+    query: "analyze",
+    payload: {
+      round: params.round,
+      pick: params.pick,
+      userRoster: params.roster,
+      availablePlayers: params.availablePlayers,
+      leagueSize: params.leagueSize,
+      pickSlot: params.pickSlot
+    }
+  };
+  
+  // DEBUG: Log the exact players being sent to API
+  console.debug('DEBUG: analyzeBlocking payload details', {
+    round: params.round,
+    pick: params.pick,
+    rosterSize: params.roster.length,
+    availablePlayersCount: params.availablePlayers.length,
+    availablePlayerNames: params.availablePlayers.map(p => ({ id: p.id, name: p.name })).slice(0, 10),
+    leagueSize: params.leagueSize,
+    pickSlot: params.pickSlot
+  });
+  
+  // DEBUG: Log the complete payload being sent to /draft/analyze
+  console.log('🐛 [DEBUG] /draft/analyze API call - FULL PAYLOAD:', {
+    endpoint: '/draft/analyze',
+    body: body,
+    payloadStructure: {
+      user: body.user,
+      conversationId: body.conversationId,
+      query: body.query,
+      payload: {
+        round: body.payload.round,
+        pick: body.payload.pick,
+        userRoster: `${body.payload.userRoster.length} players`,
+        availablePlayers: `${body.payload.availablePlayers.length} players`,
+        leagueSize: body.payload.leagueSize,
+        pickSlot: body.payload.pickSlot
+      }
+    },
+    availablePlayersDetailed: params.availablePlayers.map(p => ({
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      team: p.team?.abbr || 'Unknown',
+      adp: p.adp
+    }))
+  });
+  
+  // Add byte size preflight checks
+  const bytes = bytesOf(body);
+  const playerCount = Array.isArray(params.availablePlayers) ? params.availablePlayers.length : 0;
+
+  if (bytes >= 300_000) {
+    console.error('[PAYLOAD][ALERT] /draft/analyze bytes', { bytes, players: playerCount });
+  } else if (bytes >= 150_000) {
+    console.warn('[PAYLOAD][WARN] /draft/analyze bytes', { bytes, players: playerCount });
+  }
+
+  console.log('🐛 [DEBUG] Sending request to /draft/analyze endpoint...');
+  const res = await blockingFetch('/draft/analyze', body, 90000); // 90s timeout
+  
+  // DEBUG: Log the response from /draft/analyze
+  console.log('🐛 [DEBUG] /draft/analyze API response:', {
+    hasError: !!res?.error,
+    errorDetails: res?.error || 'No error',
+    hasContent: !!(res?.content || res?.answer || res?.data?.content || res?.data?.answer),
+    responseKeys: Object.keys(res || {}),
+    contentPreview: (res?.content || res?.answer || res?.data?.content || res?.data?.answer || '').substring(0, 200)
+  });
+  
+  // Ensure conversationId persistence after successful response
+  if (res?.conversationId) {
+    localStorage.setItem('app.draft.conversationId', String(res.conversationId));
+  }
+  
+  return res;
 }

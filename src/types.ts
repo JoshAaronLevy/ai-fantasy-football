@@ -34,7 +34,7 @@ export interface ConversationMessage {
   player?: Player; // Associated player for player-taken and user-turn messages
   round?: number; // For user-turn and analysis messages
   pick?: number; // For user-turn and analysis messages
-  meta?: { round: number; pick: number }; // For analysis messages
+  meta?: { round: number; pick: number; playerCount?: number }; // For analysis messages
 }
 
 export interface AIConversationState {

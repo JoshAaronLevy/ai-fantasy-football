@@ -6,6 +6,7 @@ import { ScrollPanel } from 'primereact/scrollpanel'
 import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Message } from 'primereact/message'
+import { Accordion, AccordionTab } from 'primereact/accordion'
 import { useDraftStore } from '../state/draftStore'
 import { MarkdownRenderer } from './common/MarkdownRenderer'
 import type { ConversationMessage } from '../types'
@@ -170,15 +171,39 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
     }
   }
 
+  // Generate accordion title for message
+  const getAccordionTitle = (message: ConversationMessage) => {
+    if (message.type === 'strategy') {
+      return 'Draft Strategy'
+    }
+    
+    if (message.type === 'analysis' && message.meta) {
+      const playerCount = message.meta.playerCount || 'Unknown'
+      return `Round ${message.meta.round} - ${playerCount} Players`
+    }
+    
+    // Fallback for other message types
+    return getMessageTitle(message.type)
+  }
+
+  // Prepare accordion items from messages
+  const accordionItems = conversationMessages.map((message) => ({
+    message,
+    title: getAccordionTitle(message)
+  }))
+
+  // Default to only the last accordion item being expanded
+  const defaultActiveIndex = accordionItems.length > 0 ? [accordionItems.length - 1] : []
+
   return (
     <Sidebar
       visible={visible}
       onHide={onHide}
       position="right"
       style={{
-        width: '33.333333vw',
+        width: '50vw',
         maxWidth: '90vw',
-        minWidth: '400px'
+        minWidth: '25vw'
       }}
       className="ai-analysis-sidebar"
       header={
@@ -297,7 +322,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
               </div>
             )}
 
-            {/* Conversation Messages */}
+            {/* Conversation Messages in Accordion */}
             {conversationMessages.length > 0 && (
               <div className="h-full flex flex-col relative">
                 <ScrollPanel
@@ -305,58 +330,83 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                   style={{ width: '100%', height: '100%' }}
                   className="pr-4"
                 >
-                  <div className="space-y-4">
-                    {conversationMessages.map((message) => (
-                      <div key={message.id} className="bg-gray-50 rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-2">
-                            <i className={`pi ${getMessageIcon(message.type)} text-blue-600`}></i>
-                            <span className="font-semibold text-gray-800">
-                              {getMessageTitle(message.type)}
+                  <Accordion
+                    multiple
+                    activeIndex={defaultActiveIndex}
+                    className="light-theme-accordion"
+                    style={{
+                      '--p-accordion-header-background': '#ffffff',
+                      '--p-accordion-header-hover-background': '#f8f9fa',
+                      '--p-accordion-header-active-background': '#e3f2fd',
+                      '--p-accordion-header-border-color': '#dee2e6',
+                      '--p-accordion-header-color': '#495057',
+                      '--p-accordion-header-hover-color': '#212529',
+                      '--p-accordion-content-background': '#ffffff',
+                      '--p-accordion-content-border-color': '#dee2e6',
+                      '--p-accordion-content-color': '#495057',
+                      '--p-accordion-toggle-icon-color': '#6c757d',
+                      '--p-accordion-toggle-icon-hover-color': '#495057'
+                    } as React.CSSProperties}
+                  >
+                    {accordionItems.map(({ message, title }) => (
+                      <AccordionTab
+                        key={message.id}
+                        header={
+                          <div className="flex items-center justify-between w-full">
+                            <div className="flex items-center gap-2">
+                              <i className={`pi ${getMessageIcon(message.type)} text-blue-600`}></i>
+                              <span className="font-semibold text-gray-800">{title}</span>
+                              {message.player && (
+                                <Tag
+                                  value={message.player.name}
+                                  severity="info"
+                                  className="text-xs"
+                                />
+                              )}
+                            </div>
+                            <span className="text-xs text-gray-500 ml-2">
+                              {formatTimestamp(message.timestamp)}
                             </span>
-                            {message.player && (
-                              <Tag 
-                                value={message.player.name} 
-                                severity="info" 
-                                className="text-xs"
-                              />
-                            )}
                           </div>
-                          <span className="text-xs text-gray-500">
-                            {formatTimestamp(message.timestamp)}
-                          </span>
+                        }
+                        style={{
+                          backgroundColor: '#ffffff',
+                          borderColor: '#dee2e6'
+                        }}
+                        className="light-theme-accordion-tab"
+                      >
+                        <div className="p-4 bg-white border-gray-200">
+                          {message.type === 'loading' ? (
+                            <div className="flex items-center gap-2">
+                              <ProgressSpinner style={{ width: '20px', height: '20px' }} strokeWidth="4" />
+                              <span className="text-sm text-gray-600">Analyzing draft situation...</span>
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-700 leading-relaxed">
+                              {isAckMessage(message.content) ? (
+                                <div className={getAckChipStyles(message.content)}>
+                                  {message.content.trim()}
+                                </div>
+                              ) : (
+                                <MarkdownRenderer
+                                  content={message.content}
+                                  className="prose max-w-none text-sm"
+                                />
+                              )}
+                            </div>
+                          )}
+                          
+                          {message.round && message.pick && (
+                            <div className="mt-3 pt-2 border-t border-gray-200">
+                              <span className="text-xs text-gray-500">
+                                Round {message.round}, Pick {message.pick}
+                              </span>
+                            </div>
+                          )}
                         </div>
-                        
-                        {message.type === 'loading' ? (
-                          <div className="flex items-center gap-2">
-                            <ProgressSpinner style={{ width: '20px', height: '20px' }} strokeWidth="4" />
-                            <span className="text-sm text-gray-600">Analyzing draft situation...</span>
-                          </div>
-                        ) : (
-                          <div className="text-sm text-gray-700 leading-relaxed">
-                            {isAckMessage(message.content) ? (
-                              <div className={getAckChipStyles(message.content)}>
-                                {message.content.trim()}
-                              </div>
-                            ) : (
-                              <MarkdownRenderer
-                                content={message.content}
-                                className="prose max-w-none text-sm"
-                              />
-                            )}
-                          </div>
-                        )}
-                        
-                        {message.round && message.pick && (
-                          <div className="mt-3 pt-2 border-t border-gray-200">
-                            <span className="text-xs text-gray-500">
-                              Round {message.round}, Pick {message.pick}
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                      </AccordionTab>
                     ))}
-                  </div>
+                  </Accordion>
                 </ScrollPanel>
                 
                 {/* Scroll to Latest Button */}
