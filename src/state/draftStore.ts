@@ -24,6 +24,7 @@ type DraftState = {
   currentRound: number;
   draftConfig: DraftConfiguration;
   hideDraftedPlayers: boolean;
+  selectedPlayers: Player[]; // Selected players for analysis
 
   // AI integration state
   conversationId: string | null;
@@ -72,6 +73,7 @@ type DraftState = {
   setDraftConfig: (config: DraftConfiguration) => void;
   isDraftConfigured: () => boolean;
   toggleHideDraftedPlayers: () => void;
+  setSelectedPlayers: (players: Player[]) => void;
 
   // AI integration actions
   setConversationId: (conversationId: string) => void;
@@ -142,6 +144,7 @@ export const useDraftStore = create<DraftState>()(
       currentRound: 1,
       draftConfig: { teams: null, pick: null },
       hideDraftedPlayers: false,
+      selectedPlayers: [],
 
       // AI integration state
       conversationId: null,
@@ -319,6 +322,7 @@ export const useDraftStore = create<DraftState>()(
         currentRound: 1,
         draftConfig: { teams: null, pick: null },
         hideDraftedPlayers: false,
+        selectedPlayers: [],
         conversationId: null,
         strategy: null,
         draftInitialized: false,
@@ -370,6 +374,8 @@ export const useDraftStore = create<DraftState>()(
       },
 
       toggleHideDraftedPlayers: () => set((s) => ({ hideDraftedPlayers: !s.hideDraftedPlayers })),
+      
+      setSelectedPlayers: (players: Player[]) => set({ selectedPlayers: players }),
 
       // AI integration actions
       setConversationId: (conversationId) => set({ conversationId }),

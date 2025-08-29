@@ -842,7 +842,8 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   const [prevIsMyTurn, setPrevIsMyTurn] = React.useState(false)
   const [prevPicksUntilTurn, setPrevPicksUntilTurn] = React.useState(0)
   const [hidingPlayerIds, setHidingPlayerIds] = React.useState<Set<string>>(new Set())
-  const [selectedPlayers, setSelectedPlayers] = React.useState<Player[]>([])
+  const selectedPlayers = useDraftStore((s) => s.selectedPlayers)
+  const setSelectedPlayers = useDraftStore((s) => s.setSelectedPlayers)
   const [isAnalyzing, setIsAnalyzing] = React.useState(false)
   const [analysisComplete, setAnalysisComplete] = React.useState(false)
   const [lastAnalyzedPlayerIds, setLastAnalyzedPlayerIds] = React.useState<string[]>([])
@@ -1096,7 +1097,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
         }
       })
       // Update local state
-      setSelectedPlayers(prev => prev.filter(player => player.id !== playerId))
+      setSelectedPlayers(selectedPlayers.filter(player => player.id !== playerId))
       // Force a refresh to update checkbox states
       setTimeout(() => {
         gridApi.refreshCells()

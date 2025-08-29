@@ -67,6 +67,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const draftConfig = useDraftStore((s) => s.draftConfig)
   const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
   const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
+  const selectedPlayers = useDraftStore((s) => s.selectedPlayers)
   
   // Scroll management state and refs
   const scrollPanelRef = useRef<ScrollPanel>(null)
@@ -175,7 +176,21 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
       
       // Get roster players (drafted by user)
       const rosterPlayers = players.filter(p => drafted[p.id])
-      const availablePlayers = players.filter(p => !drafted[p.id] && !taken[p.id])
+      
+      // Determine which players to analyze based on selection state
+      // If no players are selected (or less than 2), use top 25 available players
+      // If players are selected (2 or more), use only those selected players
+      let playersToAnalyze: typeof players
+      if (selectedPlayers.length >= 2) {
+        playersToAnalyze = selectedPlayers
+      } else {
+        // Get top 25 available players (not drafted and not taken)
+        const allAvailable = players.filter(p => !drafted[p.id] && !taken[p.id])
+        playersToAnalyze = allAvailable.slice(0, 25)
+      }
+      
+      // Filter the players to analyze to only include available ones
+      const availablePlayers = playersToAnalyze.filter(p => !drafted[p.id] && !taken[p.id])
       
       // Convert to SlimPlayer format
       const rosterSlim = rosterPlayers.map(toSlimPlayer)
