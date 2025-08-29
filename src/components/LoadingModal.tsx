@@ -9,6 +9,7 @@ interface LoadingModalProps {
 export const LoadingModal: React.FC<LoadingModalProps> = ({
   visible,
   message
+  // title intentionally unused (interface contract)
 }) => {
   if (!visible) return null
 

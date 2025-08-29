@@ -1,10 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Calculate the total character count of a payload by converting it to JSON string
  * @param payload - The payload object to count characters for
  * @returns Total character count of the stringified payload
  */
-export function calculatePayloadCharacterCount(payload: any): number {
+export function calculatePayloadCharacterCount(payload: unknown): number {
   try {
     const jsonString = JSON.stringify(payload);
     return jsonString.length;

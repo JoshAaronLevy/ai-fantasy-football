@@ -1,13 +1,13 @@
-import { v4 as uuid } from 'uuid';
+import { generateUUID } from '../uuid';
 
 const NS = 'app';
 const k = (s: string) => `${NS}.${s}`;
 
 export function getUserId(): string {
   let id = localStorage.getItem(k('userId'));
-  if (!id) { 
-    id = uuid(); 
-    localStorage.setItem(k('userId'), id); 
+  if (!id) {
+    id = generateUUID();
+    localStorage.setItem(k('userId'), id);
   }
   return id;
 }

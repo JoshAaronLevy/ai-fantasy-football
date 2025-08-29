@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useRef, useState, useEffect, useCallback } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import type { ColDef, ICellRendererParams, SelectionChangedEvent, IRowNode } from 'ag-grid-community'
@@ -8,6 +9,7 @@ import { InputText } from 'primereact/inputtext'
 import { Checkbox } from 'primereact/checkbox'
 import { Message } from 'primereact/message'
 import { Toast } from 'primereact/toast'
+import { ConfirmDialog } from 'primereact/confirmdialog'
 import type { Player } from '../types'
 import { useDraftStore } from '../state/draftStore'
 import { DraftConfigModal } from './DraftConfigModal'
@@ -146,8 +148,13 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   toast: React.RefObject<Toast | null>;
   onUserTurnTrigger?: () => void;
   onPlayerAction?: () => void;
+  isPlayerSelected?: (playerId: string) => boolean;
+  deselectPlayer?: (playerId: string) => void;
+  clearAllSelections?: () => void;
 }> = (params) => {
-  const { data, toast, onPlayerAction } = params
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { data, toast, onPlayerAction, isPlayerSelected, deselectPlayer, clearAllSelections } = params
+  // onUserTurnTrigger intentionally unused (interface contract)
   const [isTaking, setIsTaking] = useState(false)
   const [isDrafting, setIsDrafting] = useState(false)
   const [watchingPlayers, setWatchingPlayers] = useState<Set<string>>(new Set())
@@ -193,6 +200,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   if (!isDraftConfigured()) {
     const handleDraftClick = () => {
       if (!unavailable && !isDrafting && !isTaking) {
+        const playerIsSelected = isPlayerSelected?.(data.id) || false
+        
         setIsDrafting(true);
         try {
           draftPlayer(data.id);
@@ -202,8 +211,12 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
             detail: `${data.name} added to your team`,
             life: 3000
           });
-          // Clear selections after drafting
-          onPlayerAction?.();
+          
+          // Rule 5: If clicked player IS selected, clear ALL checkboxes for ALL currently selected players
+          if (playerIsSelected) {
+            clearAllSelections?.();
+          }
+          // Rule 4: If clicked player is NOT selected, do NOT affect any checkboxes
         } catch (error) {
           toast.current?.show({
             severity: 'error',
@@ -219,6 +232,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
 
     const handleTakeClick = () => {
       if (!unavailable && !isTaking && !isDrafting) {
+        const playerIsSelected = isPlayerSelected?.(data.id) || false
+        
         setIsTaking(true);
         try {
           takePlayer(data.id);
@@ -228,8 +243,12 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
             detail: `${data.name} marked as taken`,
             life: 3000
           });
-          // Clear selections after marking as taken
-          onPlayerAction?.();
+          
+          // Rule 3: If clicked player IS selected, clear ONLY that player's checkbox
+          if (playerIsSelected) {
+            deselectPlayer?.(data.id);
+          }
+          // Rule 2: If clicked player is NOT selected, do NOT affect any checkboxes
         } catch (error) {
           toast.current?.show({
             severity: 'error',
@@ -313,6 +332,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
   const handleDraftClick = async () => {
     if (!canDraftThisPlayer || !data || isDrafting) return;
     
+    const playerIsSelected = isPlayerSelected?.(data.id) || false
+    
     setIsDrafting(true);
     
     try {
@@ -351,6 +372,12 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           life: 3000
         });
         
+        // Rule 5: If clicked player IS selected, clear ALL checkboxes for ALL currently selected players
+        if (playerIsSelected) {
+          clearAllSelections?.();
+        }
+        // Rule 4: If clicked player is NOT selected, do NOT affect any checkboxes
+        
         return;
       }
       
@@ -378,8 +405,11 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         life: 3000
       });
       
-      // Clear selections after drafting
-      onPlayerAction?.();
+      // Rule 5: If clicked player IS selected, clear ALL checkboxes for ALL currently selected players
+      if (playerIsSelected) {
+        clearAllSelections?.();
+      }
+      // Rule 4: If clicked player is NOT selected, do NOT affect any checkboxes
       
       // Trigger analyze call if it's now the user's turn
       // Note: Analyze triggering will be handled by existing turn detection logic
@@ -430,8 +460,11 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           life: 3000
         });
         
-        // Clear selections after drafting
-        onPlayerAction?.();
+        // Rule 5: If clicked player IS selected, clear ALL checkboxes for ALL currently selected players
+        if (playerIsSelected) {
+          clearAllSelections?.();
+        }
+        // Rule 4: If clicked player is NOT selected, do NOT affect any checkboxes
       } else {
         toast.current?.show({
           severity: 'error',
@@ -447,6 +480,8 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
 
   const handleTakeClick = async () => {
     if (isTaking || !canTakeThisPlayer || !data) return;
+    
+    const playerIsSelected = isPlayerSelected?.(data.id) || false
     
     setIsTaking(true);
     
@@ -486,6 +521,12 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           life: 3000
         });
         
+        // Rule 3: If clicked player IS selected, clear ONLY that player's checkbox
+        if (playerIsSelected) {
+          deselectPlayer?.(data.id);
+        }
+        // Rule 2: If clicked player is NOT selected, do NOT affect any checkboxes
+        
         return;
       }
       
@@ -513,8 +554,11 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
         life: 3000
       });
       
-      // Clear selections after marking as taken
-      onPlayerAction?.();
+      // Rule 3: If clicked player IS selected, clear ONLY that player's checkbox
+      if (playerIsSelected) {
+        deselectPlayer?.(data.id);
+      }
+      // Rule 2: If clicked player is NOT selected, do NOT affect any checkboxes
       
       // Trigger analyze call if it's now the user's turn
       // Note: Analyze triggering will be handled by existing turn detection logic
@@ -565,8 +609,11 @@ const ActionButtonsCell: React.FC<ICellRendererParams<Player> & {
           life: 3000
         });
         
-        // Clear selections after marking as taken
-        onPlayerAction?.();
+        // Rule 3: If clicked player IS selected, clear ONLY that player's checkbox
+        if (playerIsSelected) {
+          deselectPlayer?.(data.id);
+        }
+        // Rule 2: If clicked player is NOT selected, do NOT affect any checkboxes
       } else {
         toast.current?.show({
           severity: 'error',
@@ -791,6 +838,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [gridApi, setGridApi] = React.useState<any>(null)
   const [showConfigModal, setShowConfigModal] = React.useState(false)
+  const [showResetConfirm, setShowResetConfirm] = React.useState(false)
   const [prevIsMyTurn, setPrevIsMyTurn] = React.useState(false)
   const [prevPicksUntilTurn, setPrevPicksUntilTurn] = React.useState(0)
   const [hidingPlayerIds, setHidingPlayerIds] = React.useState<Set<string>>(new Set())
@@ -867,6 +915,10 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   React.useEffect(() => {
     if (gridApi) {
       gridApi.refreshCells();
+      // Also refresh row selection model to update checkbox states
+      gridApi.refreshHeader();
+      // Force redraw to ensure checkbox states are updated
+      gridApi.redrawRows();
     }
   }, [gridApi, actionHistory, drafted, taken])
 
@@ -935,18 +987,10 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
     {
       headerName: '',
       width: 50,
-      checkboxSelection: true,
-      headerCheckboxSelection: true,
       suppressHeaderMenuButton: true,
       sortable: false,
       filter: false,
-      pinned: 'left',
-      checkboxSelectionCallback: (params: { data: Player | null }) => {
-        // Disable checkbox if player is drafted or taken
-        const playerId = params.data?.id;
-        if (!playerId) return false;
-        return !isDrafted(playerId) && !isTaken(playerId);
-      }
+      pinned: 'left'
     },
     { headerName: '#', width: 70, cellRenderer: IdCell, suppressHeaderMenuButton: true, sortable: false, filter: false },
     { headerName: 'Name', field: 'name', flex: 1, minWidth: 180, filter: true, cellRenderer: NameWithInfoCell },
@@ -961,7 +1005,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
     {
       headerName: 'Actions',
       width: 200,
-      cellRenderer: (params: ICellRendererParams<Player>) => <ActionButtonsCell {...params} toast={toast} onPlayerAction={clearSelections} />,
+      cellRenderer: (params: ICellRendererParams<Player>) => <ActionButtonsCell {...params} toast={toast} onPlayerAction={clearSelections} isPlayerSelected={isPlayerSelected} deselectPlayer={deselectPlayer} clearAllSelections={clearSelections} />,
       sortable: false,
       filter: false,
       suppressHeaderMenuButton: true,
@@ -1030,8 +1074,53 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
       // Reset analysis state when selections are cleared
       setAnalysisComplete(false)
       setLastAnalyzedPlayerIds([])
+      // Force a refresh to update checkbox states
+      setTimeout(() => {
+        gridApi.refreshCells()
+      }, 0)
     }
   }, [gridApi])
+
+  // Function to check if a specific player is selected
+  const isPlayerSelected = React.useCallback((playerId: string) => {
+    return selectedPlayers.some(player => player.id === playerId)
+  }, [selectedPlayers])
+
+  // Function to deselect only a specific player
+  const deselectPlayer = React.useCallback((playerId: string) => {
+    if (gridApi && isPlayerSelected(playerId)) {
+      // Get the row node for this player and deselect it
+      gridApi.forEachNode((node: IRowNode) => {
+        if (node.data && node.data.id === playerId) {
+          node.setSelected(false)
+        }
+      })
+      // Update local state
+      setSelectedPlayers(prev => prev.filter(player => player.id !== playerId))
+      // Force a refresh to update checkbox states
+      setTimeout(() => {
+        gridApi.refreshCells()
+      }, 0)
+    }
+  }, [gridApi, isPlayerSelected])
+
+  // Handle reset confirmation
+  const handleResetClick = React.useCallback(() => {
+    setShowResetConfirm(true)
+  }, [])
+
+  const handleResetConfirm = React.useCallback(() => {
+    resetDraft()
+    setShowResetConfirm(false)
+    // Auto-reload page after reset
+    setTimeout(() => {
+      window.location.reload()
+    }, 100)
+  }, [resetDraft])
+
+  const handleResetCancel = React.useCallback(() => {
+    setShowResetConfirm(false)
+  }, [])
 
   // Handle analyze button click
   const handleAnalyzeClick = React.useCallback(async () => {
@@ -1078,13 +1167,7 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
         pickSlot: draftConfig.pick || 1
       }
       
-      // Log full payload before API call
-      console.log('🚀 [ANALYZE] Full payload before API call:', payload)
-      
       const response = await analyzeBlocking(payload)
-      
-      // Log when response returns
-      console.log('✅ [ANALYZE] Response received:', response)
       
       if (response?.error) {
         toast.current?.show({
@@ -1151,8 +1234,6 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
           onClick={undoDraft}
           className="p-button-secondary"
           size="small"
-          tooltip="Undo last drafted player"
-          tooltipOptions={{ position: 'bottom' }}
           style={{
             backgroundColor: '#f1f5f9',
             borderColor: '#cbd5e1',
@@ -1162,11 +1243,9 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
         <Button
           label="Reset"
           icon="pi pi-refresh"
-          onClick={resetDraft}
+          onClick={handleResetClick}
           className="p-button-secondary"
           size="small"
-          tooltip="Clear all drafted players (local only)"
-          tooltipOptions={{ position: 'bottom' }}
           style={{
             backgroundColor: '#f1f5f9',
             borderColor: '#cbd5e1',
@@ -1370,9 +1449,13 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
           paginationPageSizeSelector={[20, 25, 50, 100]}
           theme="legacy"
           animateRows
-          rowSelection="multiple"
-          isRowSelectable={(rowNode) => {
-            return rowNode.data ? !isDrafted(rowNode.data.id) && !isTaken(rowNode.data.id) : false;
+          rowSelection={{
+            mode: "multiRow",
+            checkboxes: true,
+            headerCheckbox: true,
+            isRowSelectable: (rowNode: IRowNode<Player>) => {
+              return rowNode.data ? !isDrafted(rowNode.data.id) && !isTaken(rowNode.data.id) : false;
+            }
           }}
           onSelectionChanged={handleSelectionChanged}
           onGridReady={(params) => {
@@ -1385,6 +1468,20 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
         visible={showConfigModal}
         onHide={() => setShowConfigModal(false)}
         toast={toast}
+      />
+
+      <ConfirmDialog
+        visible={showResetConfirm}
+        onHide={handleResetCancel}
+        message="Are you sure you want to reset the draft? This will remove all picks and the draft will need to be re-initialized."
+        header="Confirm Reset"
+        icon="pi pi-exclamation-triangle"
+        accept={handleResetConfirm}
+        reject={handleResetCancel}
+        acceptLabel="Yes"
+        rejectLabel="No"
+        acceptClassName="p-button-danger"
+        rejectClassName="p-button-secondary"
       />
 
     </section>

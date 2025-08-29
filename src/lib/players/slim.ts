@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Slim player types and builders for minimal payloads
- * 
+ *
  * Usage rules:
  * - For /player-taken and /user-drafted: use toMinimalPickPlayer for minimal subset
  * - For /user-turn and /initialize: lists must be ≤ 25 players; use mapToSlimTopN or slice accordingly

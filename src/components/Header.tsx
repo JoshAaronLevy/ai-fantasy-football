@@ -1,10 +1,7 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import React from 'react'
 import { Toolbar } from 'primereact/toolbar'
 import { Button } from 'primereact/button'
 import { Tag } from 'primereact/tag'
-import { resetBlocking, formatApiError } from '../lib/api'
-import { getUserId, clearConversationId, getConversationId } from '../lib/storage/localStore'
 import { useDraftStore } from '../state/draftStore'
 
 interface HeaderProps {
@@ -12,44 +9,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
-  const [isResetting, setIsResetting] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-  const { clearAiAnswer, clearLocalState, isOfflineMode, isAnalysisLoading } = useDraftStore()
-
-  const onReset = async () => {
-    setIsResetting(true)
-    setError(null)
-
-    try {
-      const conversationId = getConversationId('draft');
-      const result = await resetBlocking({
-        user: getUserId(),
-        conversationId: conversationId || undefined
-      })
-      
-      // Check for server error response
-      if (result?.error) {
-        const errorMessage = formatApiError(result, 'Reset failed')
-        setError(errorMessage)
-        console.error('Reset failed:', errorMessage)
-        return
-      }
-      
-      // Clear localStorage conversation ID and state
-      clearConversationId('draft')
-      clearAiAnswer()
-      clearLocalState()
-
-      // Optionally show success (could use toast if available)
-      console.log('Draft reset successfully')
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Reset failed'
-      setError(errorMessage)
-      console.error('Reset failed:', errorMessage)
-    } finally {
-      setIsResetting(false)
-    }
-  }
+  const { isOfflineMode, isAnalysisLoading } = useDraftStore()
   const startContent = (
     <div className="flex items-center gap-3">
       <div>

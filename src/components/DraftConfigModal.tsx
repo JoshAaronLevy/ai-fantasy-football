@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import React from 'react'
 import { Dialog } from 'primereact/dialog'
 import { Dropdown } from 'primereact/dropdown'
@@ -9,9 +8,7 @@ import { useDraftStore } from '../state/draftStore'
 import { getUserId, setConversationId, clearConversationId } from '../lib/storage/localStore'
 import { initializeDraftBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
 import { mapToSlimTopN } from '../lib/players/slim'
-import type { SlimPlayer } from '../lib/players/slim'
 import { classifyError, extractErrorStatus } from '../lib/httpErrors'
-import { LoadingModal } from './LoadingModal'
 import { FORCE_OFFLINE_MODE } from '../lib/debug/devFlags'
 
 interface DraftConfigModalProps {
@@ -41,13 +38,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   const [error, setError] = React.useState<string | null>(null)
   const [isInitializing, setIsInitializing] = React.useState(false)
   const [showRetryCompactOptions, setShowRetryCompactOptions] = React.useState(false)
-  const [lastFailedPayload, setLastFailedPayload] = React.useState<{
-    numTeams: number;
-    userPickPosition: number;
-    players: Array<SlimPlayer>;
-    compact?: boolean;
-    inputs?: { mode: string };
-  } | null>(null)
 
   React.useEffect(() => {
     if (visible) {
@@ -227,7 +217,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
           onDraftInitialized?.()
         } else {
           // For initial failures, show retry compact options and close modal
-          setLastFailedPayload(payload)
           setShowRetryCompactOptions(true)
           setOfflineMode(true)
           setShowOfflineBanner(true)
@@ -400,12 +389,6 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
             )}
           </div>
         </div>
-        
-        <LoadingModal
-          visible={isInitializing}
-          title="Initializing draft…"
-          message="The AI Assistant is preparing your personalized draft strategy."
-        />
       </Dialog>
 
       {/* Retry Compact Options Banner - positioned over app when modal is closed */}

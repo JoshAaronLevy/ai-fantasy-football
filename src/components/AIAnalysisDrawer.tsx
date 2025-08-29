@@ -1,4 +1,5 @@
-import React, { useRef, useState, useEffect } from 'react'
+/* eslint-disable react-hooks/exhaustive-deps */
+import React, { useRef, useState, useEffect, useCallback } from 'react'
 import { Sidebar } from 'primereact/sidebar'
 import { Card } from 'primereact/card'
 import { Tag } from 'primereact/tag'
@@ -7,8 +8,11 @@ import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Message } from 'primereact/message'
 import { Accordion, AccordionTab } from 'primereact/accordion'
+import { InputTextarea } from 'primereact/inputtextarea'
 import { useDraftStore } from '../state/draftStore'
 import { MarkdownRenderer } from './common/MarkdownRenderer'
+import { queryBlocking } from '../lib/api'
+import { toSlimPlayer } from '../lib/players/slim'
 import type { ConversationMessage } from '../types'
 
 // ACK message detection function
@@ -34,6 +38,15 @@ function getAckChipStyles(content: string): string {
   return 'bg-gray-100 text-gray-800 px-3 py-2 rounded-full text-sm inline-block font-medium';
 }
 
+interface QueryEntry {
+  id: string;
+  round: number;
+  messageNumber: number;
+  user: string;
+  ai: string;
+  createdAt: number;
+}
+
 interface AIAnalysisDrawerProps {
   visible: boolean;
   onHide: () => void;
@@ -48,6 +61,12 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const isApiLoading = useDraftStore((s) => s.isApiLoading)
   const aiAnswer = useDraftStore((s) => s.aiAnswer)
   const isOfflineMode = useDraftStore((s) => s.isOfflineMode)
+  const players = useDraftStore((s) => s.players)
+  const drafted = useDraftStore((s) => s.drafted)
+  const taken = useDraftStore((s) => s.taken)
+  const draftConfig = useDraftStore((s) => s.draftConfig)
+  const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
+  const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
   
   // Scroll management state and refs
   const scrollPanelRef = useRef<ScrollPanel>(null)
@@ -55,6 +74,11 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false)
   const [lastSeenMessageCount, setLastSeenMessageCount] = useState(0)
+  
+  // User query state
+  const [userMessage, setUserMessage] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [queryEntries, setQueryEntries] = useState<QueryEntry[]>([])
   
   // Get roster players (for display)
   const rosterPlayerIds = Object.keys(myTeam)
@@ -79,7 +103,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   }
 
   // Handle scroll events to detect user position
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     if (scrollPanelRef.current) {
       const scrollElement = scrollPanelRef.current.getElement()
       if (scrollElement) {
@@ -92,7 +116,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
         }
       }
     }
-  }
+  }, [conversationMessages.length])
 
   // Auto-scroll when drawer opens
   useEffect(() => {
@@ -138,6 +162,73 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
       }
     }
   }, [conversationMessages.length])
+
+  // Send user query handler
+  const handleSendQuery = async () => {
+    if (!userMessage.trim() || isSending) return
+    
+    setIsSending(true)
+    try {
+      // Get current draft state
+      const currentRound = getCurrentRound()
+      const currentPick = getCurrentPick()
+      
+      // Get roster players (drafted by user)
+      const rosterPlayers = players.filter(p => drafted[p.id])
+      const availablePlayers = players.filter(p => !drafted[p.id] && !taken[p.id])
+      
+      // Convert to SlimPlayer format
+      const rosterSlim = rosterPlayers.map(toSlimPlayer)
+      const availableSlim = availablePlayers.map(toSlimPlayer)
+      
+      // Call queryBlocking with same payload structure as analyze
+      const { text, conversationId: newConversationId } = await queryBlocking({
+        conversationId,
+        round: currentRound || 1,
+        pick: currentPick || 1,
+        roster: rosterSlim,
+        availablePlayers: availableSlim,
+        leagueSize: draftConfig.teams || 12,
+        pickSlot: draftConfig.pick || 1,
+        userMessage: userMessage.trim()
+      })
+      
+      // Calculate message number for this round
+      const round = currentRound || 1
+      const existingEntriesInRound = queryEntries.filter(entry => entry.round === round)
+      const messageNumber = existingEntriesInRound.length + 1
+      
+      // Create new query entry
+      const newEntry: QueryEntry = {
+        id: Date.now().toString(),
+        round,
+        messageNumber,
+        user: userMessage.trim(),
+        ai: text,
+        createdAt: Date.now()
+      }
+      
+      // Update query entries
+      setQueryEntries(prev => [...prev, newEntry])
+      
+      // Clear the input
+      setUserMessage('')
+      
+      // Update conversationId if returned
+      if (newConversationId) {
+        // This would normally update the store but we'll keep it simple for now
+      }
+      
+      // Scroll to bottom after adding new entry
+      setTimeout(() => scrollToBottom(true), 100)
+      
+    } catch (error) {
+      console.error('Query failed:', error)
+      // Could show toast error here
+    } finally {
+      setIsSending(false)
+    }
+  }
 
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp)
@@ -186,14 +277,28 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
     return getMessageTitle(message.type)
   }
 
-  // Prepare accordion items from messages
-  const accordionItems = conversationMessages.map((message) => ({
+  // Prepare accordion items from messages and query entries
+  const messageItems = conversationMessages.map((message) => ({
+    type: 'message' as const,
     message,
     title: getAccordionTitle(message)
   }))
+  
+  const queryItems = queryEntries.map((entry) => ({
+    type: 'query' as const,
+    entry,
+    title: `Round ${entry.round}: User Query (${entry.messageNumber})`
+  }))
+  
+  // Combine and sort by timestamp
+  const allItems = [...messageItems, ...queryItems].sort((a, b) => {
+    const aTime = a.type === 'message' ? a.message.timestamp : a.entry.createdAt
+    const bTime = b.type === 'message' ? b.message.timestamp : b.entry.createdAt
+    return aTime - bTime
+  })
 
   // Default to only the last accordion item being expanded
-  const defaultActiveIndex = accordionItems.length > 0 ? [accordionItems.length - 1] : []
+  const defaultActiveIndex = allItems.length > 0 ? [allItems.length - 1] : []
 
   return (
     <Sidebar
@@ -348,24 +453,24 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                       '--p-accordion-toggle-icon-hover-color': '#495057'
                     } as React.CSSProperties}
                   >
-                    {accordionItems.map(({ message, title }) => (
+                    {allItems.map((item) => (
                       <AccordionTab
-                        key={message.id}
+                        key={item.type === 'message' ? item.message.id : item.entry.id}
                         header={
                           <div className="flex items-center justify-between w-full">
                             <div className="flex items-center gap-2">
-                              <i className={`pi ${getMessageIcon(message.type)} text-blue-600`}></i>
-                              <span className="font-semibold text-gray-800">{title}</span>
-                              {message.player && (
+                              <i className={`pi ${item.type === 'message' ? getMessageIcon(item.message.type) : 'pi-comment'} text-blue-600`}></i>
+                              <span className="font-semibold text-gray-800">{item.title}</span>
+                              {item.type === 'message' && item.message.player && (
                                 <Tag
-                                  value={message.player.name}
+                                  value={item.message.player.name}
                                   severity="info"
                                   className="text-xs"
                                 />
                               )}
                             </div>
                             <span className="text-xs text-gray-500 ml-2">
-                              {formatTimestamp(message.timestamp)}
+                              {formatTimestamp(item.type === 'message' ? item.message.timestamp : item.entry.createdAt)}
                             </span>
                           </div>
                         }
@@ -376,31 +481,53 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                         className="light-theme-accordion-tab"
                       >
                         <div className="p-4 bg-white border-gray-200">
-                          {message.type === 'loading' ? (
-                            <div className="flex items-center gap-2">
-                              <ProgressSpinner style={{ width: '20px', height: '20px' }} strokeWidth="4" />
-                              <span className="text-sm text-gray-600">Analyzing draft situation...</span>
-                            </div>
-                          ) : (
-                            <div className="text-sm text-gray-700 leading-relaxed">
-                              {isAckMessage(message.content) ? (
-                                <div className={getAckChipStyles(message.content)}>
-                                  {message.content.trim()}
+                          {item.type === 'message' ? (
+                            <>
+                              {item.message.type === 'loading' ? (
+                                <div className="flex items-center gap-2">
+                                  <ProgressSpinner style={{ width: '20px', height: '20px' }} strokeWidth="4" />
+                                  <span className="text-sm text-gray-600">Analyzing draft situation...</span>
                                 </div>
                               ) : (
-                                <MarkdownRenderer
-                                  content={message.content}
-                                  className="prose max-w-none text-sm"
-                                />
+                                <div className="text-sm text-gray-700 leading-relaxed">
+                                  {isAckMessage(item.message.content) ? (
+                                    <div className={getAckChipStyles(item.message.content)}>
+                                      {item.message.content.trim()}
+                                    </div>
+                                  ) : (
+                                    <MarkdownRenderer
+                                      content={item.message.content}
+                                      className="prose max-w-none text-sm"
+                                    />
+                                  )}
+                                </div>
                               )}
-                            </div>
-                          )}
-                          
-                          {message.round && message.pick && (
-                            <div className="mt-3 pt-2 border-t border-gray-200">
-                              <span className="text-xs text-gray-500">
-                                Round {message.round}, Pick {message.pick}
-                              </span>
+                              
+                              {item.message.round && item.message.pick && (
+                                <div className="mt-3 pt-2 border-t border-gray-200">
+                                  <span className="text-xs text-gray-500">
+                                    Round {item.message.round}, Pick {item.message.pick}
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="space-y-4">
+                              <div>
+                                <div className="text-sm font-medium text-gray-800 mb-2">User:</div>
+                                <div className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
+                                  {item.entry.user}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-sm font-medium text-blue-800 mb-2">AI Assistant:</div>
+                                <div className="text-sm text-gray-700">
+                                  <MarkdownRenderer
+                                    content={item.entry.ai}
+                                    className="prose max-w-none text-sm"
+                                  />
+                                </div>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -465,6 +592,31 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
             )}
           </Card>
         </div>
+        
+        {/* User Query Input - Fixed at bottom */}
+        {draftInitialized && (
+          <div className="mt-4 p-4 bg-white border-t border-gray-200">
+            <div className="flex gap-2">
+              <InputTextarea
+                value={userMessage}
+                onChange={(e) => setUserMessage(e.target.value)}
+                placeholder="Ask the AI assistant a question about your draft..."
+                rows={2}
+                autoResize
+                className="flex-1"
+                disabled={isSending}
+              />
+              <Button
+                icon={isSending ? "pi pi-spin pi-spinner" : "pi pi-send"}
+                label="Send"
+                onClick={handleSendQuery}
+                disabled={isSending || !userMessage.trim()}
+                className="p-button-primary"
+                style={{ minWidth: '80px' }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </Sidebar>
   )

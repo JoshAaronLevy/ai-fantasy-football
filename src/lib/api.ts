@@ -408,32 +408,6 @@ export async function analyzeBlocking(params: {
     pickSlot: params.pickSlot
   });
   
-  // DEBUG: Log the complete payload being sent to /draft/analyze
-  console.log('🐛 [DEBUG] /draft/analyze API call - FULL PAYLOAD:', {
-    endpoint: '/draft/analyze',
-    body: body,
-    payloadStructure: {
-      user: body.user,
-      conversationId: body.conversationId,
-      query: body.query,
-      payload: {
-        round: body.payload.round,
-        pick: body.payload.pick,
-        userRoster: `${body.payload.userRoster.length} players`,
-        availablePlayers: `${body.payload.availablePlayers.length} players`,
-        leagueSize: body.payload.leagueSize,
-        pickSlot: body.payload.pickSlot
-      }
-    },
-    availablePlayersDetailed: params.availablePlayers.map(p => ({
-      id: p.id,
-      name: p.name,
-      position: p.position,
-      team: p.team?.abbr || 'Unknown',
-      adp: p.adp
-    }))
-  });
-  
   // Add byte size preflight checks
   const bytes = bytesOf(body);
   const playerCount = Array.isArray(params.availablePlayers) ? params.availablePlayers.length : 0;
@@ -444,17 +418,7 @@ export async function analyzeBlocking(params: {
     console.warn('[PAYLOAD][WARN] /draft/analyze bytes', { bytes, players: playerCount });
   }
 
-  console.log('🐛 [DEBUG] Sending request to /draft/analyze endpoint...');
   const res = await blockingFetch('/draft/analyze', body, 90000); // 90s timeout
-  
-  // DEBUG: Log the response from /draft/analyze
-  console.log('🐛 [DEBUG] /draft/analyze API response:', {
-    hasError: !!res?.error,
-    errorDetails: res?.error || 'No error',
-    hasContent: !!(res?.content || res?.answer || res?.data?.content || res?.data?.answer),
-    responseKeys: Object.keys(res || {}),
-    contentPreview: (res?.content || res?.answer || res?.data?.content || res?.data?.answer || '').substring(0, 200)
-  });
   
   // Ensure conversationId persistence after successful response
   if (res?.conversationId) {
@@ -462,4 +426,71 @@ export async function analyzeBlocking(params: {
   }
   
   return res;
+}
+
+/**
+ * Query the draft assistant with a user message using the new /draft/query endpoint
+ * @param params - Draft query parameters including user message
+ * @returns Promise resolving to query response with extracted text and conversationId
+ */
+export async function queryBlocking(params: {
+  conversationId?: string | null;
+  round: number;
+  pick: number;
+  roster: SlimPlayer[];
+  availablePlayers: SlimPlayer[];
+  leagueSize?: number;
+  pickSlot?: number;
+  userMessage: string;
+}): Promise<{ text: string; conversationId?: string }> {
+  const body = {
+    user: getUserId(),
+    conversationId: params.conversationId,
+    query: params.userMessage,
+    payload: {
+      round: params.round,
+      pick: params.pick,
+      userRoster: params.roster,
+      availablePlayers: params.availablePlayers,
+      leagueSize: params.leagueSize,
+      pickSlot: params.pickSlot
+    }
+  };
+  
+  // DEBUG: Log the exact players being sent to API
+  console.debug('DEBUG: queryBlocking payload details', {
+    round: params.round,
+    pick: params.pick,
+    rosterSize: params.roster.length,
+    availablePlayersCount: params.availablePlayers.length,
+    availablePlayerNames: params.availablePlayers.map(p => ({ id: p.id, name: p.name })).slice(0, 10),
+    leagueSize: params.leagueSize,
+    pickSlot: params.pickSlot,
+    userMessage: params.userMessage
+  });
+  
+  // Add byte size preflight checks
+  const bytes = bytesOf(body);
+  const playerCount = Array.isArray(params.availablePlayers) ? params.availablePlayers.length : 0;
+
+  if (bytes >= 300_000) {
+    console.error('[PAYLOAD][ALERT] /draft/query bytes', { bytes, players: playerCount });
+  } else if (bytes >= 150_000) {
+    console.warn('[PAYLOAD][WARN] /draft/query bytes', { bytes, players: playerCount });
+  }
+
+  const res = await blockingFetch('/draft/query', body, 90000); // 90s timeout
+  
+  // Extract text from response using helper function
+  const text = getTextFromLlmResponse(res);
+  
+  // Ensure conversationId persistence after successful response
+  if (res?.conversationId) {
+    localStorage.setItem('app.draft.conversationId', String(res.conversationId));
+  }
+  
+  return {
+    text,
+    conversationId: res?.conversationId
+  };
 }

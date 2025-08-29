@@ -1,0 +1,33 @@
+# --- deps & build output ---
+node_modules/
+dist/
+build/
+.next/
+.out/
+.vercel/
+.turbo/
+.cache/
+coverage/
+
+# --- logs ---
+*.log
+logs/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- env & secrets ---
+.env
+.env.*
+!.env.example
+secrets.*
+config/**/secrets*.json
+
+# --- large/static assets you don't want Roo to read/write ---
+public/**/*.map
+public/**/*.mp4
+public/**/*.zip
+
+# --- system/editor junk ---
+.DS_Store
+Thumbs.db
