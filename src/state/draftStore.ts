@@ -25,6 +25,8 @@ type DraftState = {
   draftConfig: DraftConfiguration;
   hideDraftedPlayers: boolean;
   selectedPlayers: Player[]; // Selected players for analysis
+  hasInitializedDraft: boolean; // Track if draft has been initialized
+  hasHydrated: boolean; // Track if store has been hydrated from persistence
 
   // AI integration state
   conversationId: string | null;
@@ -36,6 +38,13 @@ type DraftState = {
   isAnalysisLoading: boolean; // New shared state for both initialize and analyze operations
   aiAnswer: string;
   
+  // AI Assistant streaming state
+  assistantStreaming: {
+    isOpen: boolean;
+    isStreaming: boolean;
+    content: string;
+    error?: string;
+  };
 
   // Offline mode state
   isOfflineMode: boolean;
@@ -74,6 +83,9 @@ type DraftState = {
   isDraftConfigured: () => boolean;
   toggleHideDraftedPlayers: () => void;
   setSelectedPlayers: (players: Player[]) => void;
+  markInitialized: () => void;
+  resetInitialized: () => void;
+  setHasHydrated: (hydrated: boolean) => void;
 
   // AI integration actions
   setConversationId: (conversationId: string) => void;
@@ -90,6 +102,12 @@ type DraftState = {
   clearAiAnswer: () => void;
   clearLocalState: () => void;
   
+  // AI Assistant streaming actions
+  openAssistantStreaming: () => void;
+  appendAssistantStream: (text: string) => void;
+  finishAssistantStreaming: () => void;
+  failAssistantStreaming: (error: string) => void;
+  closeAssistantStreaming: () => void;
 
   // Offline mode actions
   setOfflineMode: (isOffline: boolean) => void;
@@ -145,7 +163,9 @@ export const useDraftStore = create<DraftState>()(
       draftConfig: { teams: null, pick: null },
       hideDraftedPlayers: false,
       selectedPlayers: [],
-
+      hasInitializedDraft: false,
+      hasHydrated: false,
+    
       // AI integration state
       conversationId: null,
       strategy: null,
@@ -156,6 +176,13 @@ export const useDraftStore = create<DraftState>()(
       isAnalysisLoading: false,
       aiAnswer: '',
       
+      // AI Assistant streaming state
+      assistantStreaming: {
+        isOpen: false,
+        isStreaming: false,
+        content: '',
+        error: undefined,
+      },
 
       // Offline mode state
       isOfflineMode: false,
@@ -323,6 +350,7 @@ export const useDraftStore = create<DraftState>()(
         draftConfig: { teams: null, pick: null },
         hideDraftedPlayers: false,
         selectedPlayers: [],
+        hasInitializedDraft: false,
         conversationId: null,
         strategy: null,
         draftInitialized: false,
@@ -376,7 +404,13 @@ export const useDraftStore = create<DraftState>()(
       toggleHideDraftedPlayers: () => set((s) => ({ hideDraftedPlayers: !s.hideDraftedPlayers })),
       
       setSelectedPlayers: (players: Player[]) => set({ selectedPlayers: players }),
-
+      
+      markInitialized: () => set({ hasInitializedDraft: true }),
+      
+      resetInitialized: () => set({ hasInitializedDraft: false }),
+      
+      setHasHydrated: (hasHydrated) => set({ hasHydrated }),
+    
       // AI integration actions
       setConversationId: (conversationId) => set({ conversationId }),
       setStrategy: (strategy) => set({ strategy }),
@@ -408,14 +442,57 @@ export const useDraftStore = create<DraftState>()(
       
       clearAiAnswer: () => set({ aiAnswer: '' }),
       
+      // AI Assistant streaming actions
+      openAssistantStreaming: () => set({
+        assistantStreaming: {
+          isOpen: true,
+          isStreaming: true,
+          content: '',
+          error: undefined,
+        }
+      }),
+      appendAssistantStream: (text: string) => set((state) => ({
+        assistantStreaming: {
+          ...state.assistantStreaming,
+          content: state.assistantStreaming.content + text,
+        }
+      })),
+      finishAssistantStreaming: () => set((state) => ({
+        assistantStreaming: {
+          ...state.assistantStreaming,
+          isStreaming: false,
+        }
+      })),
+      failAssistantStreaming: (error: string) => set((state) => ({
+        assistantStreaming: {
+          ...state.assistantStreaming,
+          isStreaming: false,
+          error: error,
+        }
+      })),
+      closeAssistantStreaming: () => set((state) => ({
+        assistantStreaming: {
+          ...state.assistantStreaming,
+          isOpen: false,
+        }
+      })),
+      
       clearLocalState: () => set({
         aiAnswer: '',
         drafted: {},
         myTeam: {},
         taken: {},
+        hasInitializedDraft: false,
         actionHistory: [],
         currentRound: 1,
         conversationMessages: [],
+        // Reset streaming state as well
+        assistantStreaming: {
+          isOpen: false,
+          isStreaming: false,
+          content: '',
+          error: undefined,
+        },
         // Clear enhanced action queue state
         actionQueue: {
           queue: [],
@@ -1119,6 +1196,14 @@ export const useDraftStore = create<DraftState>()(
           };
         }
         return persistedState;
+      },
+      onRehydrateStorage: () => {
+        return (state) => {
+          // Mark that we've hydrated from storage
+          if (state) {
+            state.setHasHydrated(true);
+          }
+        };
       }
     }
   )

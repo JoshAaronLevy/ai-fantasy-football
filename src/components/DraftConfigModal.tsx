@@ -5,39 +5,27 @@ import { Button } from 'primereact/button'
 import { Message } from 'primereact/message'
 import { Toast } from 'primereact/toast'
 import { useDraftStore } from '../state/draftStore'
-import { getUserId, setConversationId, clearConversationId } from '../lib/storage/localStore'
-import { initializeDraftBlocking, getTextFromLlmResponse, formatApiError } from '../lib/api'
-import { mapToSlimTopN } from '../lib/players/slim'
-import { classifyError, extractErrorStatus } from '../lib/httpErrors'
+import { getUserId } from '../lib/storage/localStore'
 import { FORCE_OFFLINE_MODE } from '../lib/debug/devFlags'
 
 interface DraftConfigModalProps {
   visible: boolean;
   onHide: () => void;
-  onDraftInitialized?: () => void;
   toast: React.RefObject<Toast | null>;
 }
 
-export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onHide, onDraftInitialized, toast }) => {
+export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onHide, toast }) => {
   const {
     draftConfig,
     players,
     initializeDraftState,
-    isDrafted,
-    isTaken,
     isOfflineMode,
-    setOfflineMode,
-    setShowOfflineBanner,
-    initializeDraftOffline,
-    setAiAnswer,
-    setAnalysisLoading
+    initializeDraftOffline
   } = useDraftStore()
   
   const [selectedTeams, setSelectedTeams] = React.useState<number | null>(draftConfig.teams)
   const [selectedPick, setSelectedPick] = React.useState<number | null>(draftConfig.pick)
   const [error, setError] = React.useState<string | null>(null)
-  const [isInitializing, setIsInitializing] = React.useState(false)
-  const [showRetryCompactOptions, setShowRetryCompactOptions] = React.useState(false)
 
   React.useEffect(() => {
     if (visible) {
@@ -69,12 +57,7 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
 
   const isFormValid = selectedTeams !== null && selectedPick !== null
 
-  const initializeDraft = async (isCompactRetry = false) => {
-    if (isInitializing) {
-      console.debug('INIT DRAFT: blocked (already initializing)');
-      return;
-    }
-
+  const initializeDraft = () => {
     if (!isFormValid || !selectedTeams || !selectedPick || players.length === 0) return
 
     const config = { teams: selectedTeams, pick: selectedPick }
@@ -106,151 +89,37 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
       return;
     }
 
-    setIsInitializing(true)
-    setAnalysisLoading(true)
     setError(null)
-    setShowRetryCompactOptions(false)
 
     if (isOfflineMode || FORCE_OFFLINE_MODE) {
-      try {
-        initializeDraftOffline(config)
-        toast.current?.show({
-          severity: 'info',
-          summary: 'Draft Initialized (Offline)',
-          detail: 'Draft configuration saved. AI analysis unavailable in offline mode.',
-          life: 3000
-        })
-        onHide()
-        onDraftInitialized?.()
-      } finally {
-        setIsInitializing(false)
-        setAnalysisLoading(false)
-      }
-      return
-    }
-
-    const availablePlayers = players
-      .filter(player => !isDrafted(player.id) && !isTaken(player.id))
-
-    const slimmedRoster = mapToSlimTopN(availablePlayers, 25)
-
-    const payload = {
-      numTeams: selectedTeams,
-      userPickPosition: selectedPick,
-      players: slimmedRoster,
-      ...(isCompactRetry && { compact: true, inputs: { mode: 'compact' } })
-    }
-
-    // Close modal immediately for better UX
-    onHide()
-
-    try {
-      const data = await initializeDraftBlocking(payload)
-
-      if (data?.error) {
-        const errorDetail = formatApiError(data, 'Draft initialization failed')
-        
-        toast.current?.show({
-          severity: 'error',
-          summary: 'Draft Initialization Failed',
-          detail: errorDetail,
-          life: 5000
-        })
-        
-        return
-      }
-
-      if (data.conversationId) {
-        setConversationId('draft', data.conversationId)
-      }
-
-      const strategyContent = getTextFromLlmResponse(data)
-
-      setAiAnswer(strategyContent)
-
+      initializeDraftOffline(config)
+      toast.current?.show({
+        severity: 'info',
+        summary: 'Draft Initialized (Offline)',
+        detail: 'Draft configuration saved. AI analysis unavailable in offline mode.',
+        life: 3000
+      })
+    } else {
+      // Initialize draft state with basic strategy message
       initializeDraftState(
-        data.conversationId || '',
-        strategyContent || 'Draft strategy initialized.',
+        '', // No conversationId
+        'Draft configuration saved. Ready to start drafting!',
         config
       )
-
+      
       toast.current?.show({
         severity: 'success',
         summary: 'Draft Initialized',
         detail: 'Ready to draft!',
         life: 3000
       })
-
-      onDraftInitialized?.()
-    } catch (e: unknown) {
-      const status = extractErrorStatus(e)
-      
-      // Handle 409 invalid_conversation specially
-      if (status === 409) {
-        clearConversationId('draft')
-        toast.current?.show({
-          severity: 'warn',
-          summary: 'Session Expired',
-          detail: 'Session expired. Please re-initialize your draft.',
-          life: 5000
-        })
-        setIsInitializing(false)
-        return // Keep modal open for re-initialization
-      }
-
-      const cls = classifyError(e)
-      
-      if (cls.offlineWorthy) {
-        // For compact retry failures, go straight to offline mode
-        if (isCompactRetry) {
-          setOfflineMode(true)
-          setShowOfflineBanner(true)
-          toast.current?.show({
-            severity: 'warn',
-            summary: 'Connection Issue',
-            detail: 'Switched to Offline Mode.',
-            life: 5000
-          })
-          
-          // Initialize offline and close modal
-          initializeDraftOffline(config)
-          onDraftInitialized?.()
-        } else {
-          // For initial failures, show retry compact options and close modal
-          setShowRetryCompactOptions(true)
-          setOfflineMode(true)
-          setShowOfflineBanner(true)
-          toast.current?.show({
-            severity: 'warn',
-            summary: 'Connection Issue',
-            detail: 'Connection issue — switched to Offline Mode.',
-            life: 5000
-          })
-          // Modal already closed at start of try block
-        }
-      } else {
-        // Non-offline-worthy errors: keep modal open and show inline error
-        setError(`Failed (${cls.reason}). Check inputs and try again.`)
-      }
-    } finally {
-      setIsInitializing(false)
-      setAnalysisLoading(false)
     }
+
+    onHide()
+    // Note: Removed onDraftInitialized?.() call - drawer should only open via "Initialize Draft" button
   }
 
-  const onLetsDraft = () => initializeDraft(false)
-
-  const onRetryCompact = () => {
-    setShowRetryCompactOptions(false)
-    initializeDraft(true)
-  }
-
-  const onGoOffline = () => {
-    setShowRetryCompactOptions(false)
-    const config = { teams: selectedTeams!, pick: selectedPick! }
-    initializeDraftOffline(config)
-    onDraftInitialized?.()
-  }
+  const onLetsDraft = () => initializeDraft()
 
   const handleDismiss = () => {
     setError(null)
@@ -260,49 +129,8 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
   React.useEffect(() => {
     if (visible) {
       setError(null)
-      setShowRetryCompactOptions(false)
     }
   }, [visible])
-
-  // Render retry compact options banner when needed
-  const renderRetryCompactBanner = () => {
-    if (!showRetryCompactOptions) return null
-
-    return (
-      <div className="w-full bg-orange-50 border border-orange-200 rounded-md p-4 mb-4">
-        <div className="flex items-start gap-3">
-          <i className="pi pi-exclamation-triangle text-orange-600 mt-1" />
-          <div className="flex-1">
-            <h4 className="font-medium text-orange-800 mb-2">
-              Connection Issue
-            </h4>
-            <p className="text-orange-700 text-sm mb-3">
-              Initial draft setup failed due to connection issues. You can retry with a faster compact mode or continue offline.
-            </p>
-            <div className="flex gap-2">
-              <Button
-                label="Retry Compact"
-                onClick={onRetryCompact}
-                size="small"
-                severity="warning"
-                className="text-orange-800"
-                disabled={isInitializing}
-              />
-              <Button
-                label="Go Offline"
-                onClick={onGoOffline}
-                size="small"
-                outlined
-                severity="warning"
-                className="text-orange-800 border-orange-400"
-                disabled={isInitializing}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <>
@@ -372,33 +200,22 @@ export const DraftConfigModal: React.FC<DraftConfigModalProps> = ({ visible, onH
 
           <div className="modal-buttons flex justify-center gap-3 pt-4 mt-4">
             <Button
-              label={isInitializing ? 'Initializing…' : "Start Draft!"}
+              label="Let's Draft!"
               onClick={onLetsDraft}
-              disabled={!isFormValid || isInitializing || players.length === 0}
+              disabled={!isFormValid || players.length === 0}
               className="p-button-success"
               style={{ minWidth: '120px' }}
             />
-            {!isInitializing && (
-              <Button
-                label="Cancel"
-                onClick={handleDismiss}
-                className="p-button-secondary"
-                outlined
-                style={{ minWidth: '100px' }}
-              />
-            )}
+            <Button
+              label="Cancel"
+              onClick={handleDismiss}
+              className="p-button-secondary"
+              outlined
+              style={{ minWidth: '100px' }}
+            />
           </div>
         </div>
       </Dialog>
-
-      {/* Retry Compact Options Banner - positioned over app when modal is closed */}
-      {showRetryCompactOptions && (
-        <div className="fixed top-16 left-0 right-0 z-50 px-4">
-          <div className="max-w-2xl mx-auto">
-            {renderRetryCompactBanner()}
-          </div>
-        </div>
-      )}
     </>
   )
 }

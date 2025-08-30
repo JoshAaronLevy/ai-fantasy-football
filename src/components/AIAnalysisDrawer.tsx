@@ -69,8 +69,13 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
   const selectedPlayers = useDraftStore((s) => s.selectedPlayers)
   
+  // AI Assistant streaming state and actions
+  const assistantStreaming = useDraftStore((s) => s.assistantStreaming)
+  const closeAssistantStreaming = useDraftStore((s) => s.closeAssistantStreaming)
+  
   // Scroll management state and refs
   const scrollPanelRef = useRef<ScrollPanel>(null)
+  const streamingContentRef = useRef<HTMLDivElement>(null)
   const [isUserAtBottom, setIsUserAtBottom] = useState(true)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false)
@@ -133,6 +138,13 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
     }
   }, [visible, hasUnreadMessages])
 
+  // Debug log when drawer becomes visible
+  useEffect(() => {
+    if (visible && import.meta.env.DEV) {
+      console.info('[assistant-ui] drawer visible=true');
+    }
+  }, [visible])
+
   // Auto-scroll when new messages arrive (only if user is at bottom or drawer is visible)
   useEffect(() => {
     if (conversationMessages.length > lastSeenMessageCount) {
@@ -149,6 +161,14 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
       }
     }
   }, [conversationMessages.length, visible, isUserAtBottom, lastSeenMessageCount])
+
+  // Auto-scroll for streaming content
+  useEffect(() => {
+    if (assistantStreaming.isOpen && streamingContentRef.current) {
+      const element = streamingContentRef.current
+      element.scrollTop = element.scrollHeight
+    }
+  }, [assistantStreaming.content.length, assistantStreaming.isOpen])
 
   // Set up scroll listener
   useEffect(() => {
@@ -384,6 +404,59 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
             </div>
             <div className="text-sm text-gray-600 mt-2">
               {rosterPlayerIds.length} player{rosterPlayerIds.length !== 1 ? 's' : ''} drafted
+            </div>
+          </Card>
+        )}
+
+        {/* AI Assistant Streaming Section */}
+        {assistantStreaming.isOpen && (
+          <Card
+            title="AI Assistant - Live Analysis"
+            className="mb-4"
+            style={{ backgroundColor: '#f0f9ff' }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                {assistantStreaming.isStreaming && (
+                  <ProgressSpinner style={{ width: '20px', height: '20px' }} strokeWidth="4" />
+                )}
+                <span className="text-sm font-medium text-blue-800">
+                  {assistantStreaming.isStreaming ? 'AI is thinking...' : 'Analysis Complete'}
+                </span>
+              </div>
+              <Button
+                icon="pi pi-times"
+                className="p-button-text p-button-sm"
+                onClick={closeAssistantStreaming}
+                tooltip="Close streaming analysis"
+                tooltipOptions={{ position: 'left' }}
+              />
+            </div>
+            
+            <div
+              ref={streamingContentRef}
+              className="max-h-64 overflow-y-auto bg-white p-3 rounded border"
+              style={{ minHeight: '100px' }}
+            >
+              {assistantStreaming.error ? (
+                <div className="text-red-600 text-sm">
+                  <i className="pi pi-exclamation-triangle mr-2"></i>
+                  Error: {assistantStreaming.error}
+                </div>
+              ) : assistantStreaming.content ? (
+                <MarkdownRenderer
+                  content={assistantStreaming.content}
+                  className="prose max-w-none text-sm text-gray-700 leading-relaxed"
+                />
+              ) : assistantStreaming.isStreaming ? (
+                <div className="text-gray-500 text-sm italic">
+                  Building your draft plan...
+                </div>
+              ) : (
+                <div className="text-gray-500 text-sm italic">
+                  No analysis yet.
+                </div>
+              )}
             </div>
           </Card>
         )}

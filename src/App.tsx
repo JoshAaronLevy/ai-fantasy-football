@@ -11,15 +11,17 @@ import { FORCE_OFFLINE_MODE } from './lib/debug/devFlags'
 
 export default function App() {
   const isDraftConfigured = useDraftStore((s) => s.isDraftConfigured)
+  const hasHydrated = useDraftStore((s) => s.hasHydrated)
   const setPlayers = useDraftStore((s) => s.setPlayers)
   const setPlayersLoading = useDraftStore((s) => s.setPlayersLoading)
   const setPlayersError = useDraftStore((s) => s.setPlayersError)
   const players = useDraftStore((s) => s.players)
   const setOfflineMode = useDraftStore((s) => s.setOfflineMode)
   const setShowOfflineBanner = useDraftStore((s) => s.setShowOfflineBanner)
+  const assistantStreaming = useDraftStore((s) => s.assistantStreaming)
+  const closeAssistantStreaming = useDraftStore((s) => s.closeAssistantStreaming)
   
   const [showConfigModal, setShowConfigModal] = React.useState(false)
-  const [showAIAnalysis, setShowAIAnalysis] = React.useState(false)
   
   // Toast ref for showing notifications
   const toast = React.useRef<Toast>(null)
@@ -73,30 +75,40 @@ export default function App() {
     loadPlayers()
   }, [players.length, setPlayers, setPlayersLoading, setPlayersError, setOfflineMode, setShowOfflineBanner])
 
-  // Show modal on first load if draft is not configured
+  // Show modal on first load if draft is not configured - but only after hydration is complete
   React.useEffect(() => {
-    if (!isDraftConfigured()) {
+    if (hasHydrated && !isDraftConfigured()) {
       setShowConfigModal(true)
     }
-  }, [isDraftConfigured])
+  }, [hasHydrated, isDraftConfigured])
 
   return (
     <div className="min-h-screen flex flex-col">
       <Toast ref={toast} />
       <OfflineBanner toast={toast} />
-      <Header onViewAIAnalysis={() => setShowAIAnalysis(true)} />
+      <Header onViewAIAnalysis={() => {
+        if (import.meta.env.DEV) {
+          console.info('[assistant-ui] Header open button clicked');
+        }
+        // Use store action instead of local state
+        useDraftStore.getState().openAssistantStreaming();
+      }} />
       <main className="custom-main">
         <PlayersGrid toast={toast} />
       </main>
       <DraftConfigModal
         visible={showConfigModal}
         onHide={() => setShowConfigModal(false)}
-        onDraftInitialized={() => setShowAIAnalysis(true)}
         toast={toast}
       />
       <AIAnalysisDrawer
-        visible={showAIAnalysis}
-        onHide={() => setShowAIAnalysis(false)}
+        visible={assistantStreaming.isOpen}
+        onHide={() => {
+          if (import.meta.env.DEV) {
+            console.info('[assistant-ui] drawer onHide called');
+          }
+          closeAssistantStreaming();
+        }}
       />
     </div>
   )
