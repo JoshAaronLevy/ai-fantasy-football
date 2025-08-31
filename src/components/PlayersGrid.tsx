@@ -140,13 +140,6 @@ const NameWithInfoCell: React.FC<ICellRendererParams<Player>> = ({ data }) => {
   )
 }
 
-// Simple ID Cell (replaces StarCell)
-const IdCell: React.FC<ICellRendererParams<Player>> = ({ data }) => {
-  if (!data) return null
-  return <span>{data.id}</span>
-}
-
-
 const OverallRankCell: React.FC<ICellRendererParams<Player>> = ({ data }) => {
   if (!data) return null
 
@@ -450,15 +443,6 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
   }, [data, isStarred, showStarredOnly, hideDraftedPlayers, hidingPlayerIds])
 
   const colDefs = React.useMemo<ColDef<Player>[]>(() => [
-    {
-      headerName: '',
-      width: 50,
-      suppressHeaderMenuButton: true,
-      sortable: false,
-      filter: false,
-      pinned: 'left'
-    },
-    { headerName: '#', width: 70, cellRenderer: IdCell, suppressHeaderMenuButton: true, sortable: false, filter: false },
     { headerName: 'Name', field: 'name', flex: 1, minWidth: 180, filter: true, cellRenderer: NameWithInfoCell },
     { headerName: 'Pos', field: 'position', width: 90, filter: true },
     { headerName: 'Team', field: 'team.abbr', width: 90, filter: true, cellRenderer: TeamLogoCell },

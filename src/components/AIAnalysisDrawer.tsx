@@ -138,13 +138,6 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
     }
   }, [visible, hasUnreadMessages])
 
-  // Debug log when drawer becomes visible
-  useEffect(() => {
-    if (visible && import.meta.env.DEV) {
-      console.info('[assistant-ui] drawer visible=true');
-    }
-  }, [visible])
-
   // Auto-scroll when new messages arrive (only if user is at bottom or drawer is visible)
   useEffect(() => {
     if (conversationMessages.length > lastSeenMessageCount) {
