@@ -93,6 +93,9 @@ type DraftState = {
   setDraftInitialized: (initialized: boolean) => void;
   initializeDraftState: (conversationId: string, strategy: string, config: DraftConfiguration) => void;
   addConversationMessage: (message: ConversationMessage) => void;
+  updateConversationMessage: (id: string, updates: Partial<ConversationMessage>) => void;
+  persistStreamingContent: (content: string) => void;
+  getLastInitializeMessage: () => ConversationMessage | null;
   setApiLoading: (loading: boolean) => void;
   setIsInitializingDraft: (loading: boolean) => void;
   setAnalysisLoading: (loading: boolean) => void;
@@ -431,6 +434,67 @@ export const useDraftStore = create<DraftState>()(
       addConversationMessage: (message) => set((s) => ({
         conversationMessages: [...s.conversationMessages, message]
       })),
+      updateConversationMessage: (id: string, updates: Partial<ConversationMessage>) => set((s) => {
+        const messageIndex = s.conversationMessages.findIndex(msg => msg.id === id);
+        if (messageIndex === -1) {
+          return s; // Message not found, no update
+        }
+        
+        const updatedMessages = [...s.conversationMessages];
+        const currentMessage = updatedMessages[messageIndex];
+        
+        // Special handling for content updates during streaming - append instead of replace
+        let newContent = currentMessage.content;
+        if (updates.content !== undefined && currentMessage.status === 'streaming') {
+          newContent = currentMessage.content + updates.content;
+        } else if (updates.content !== undefined) {
+          newContent = updates.content;
+        }
+        
+        updatedMessages[messageIndex] = {
+          ...currentMessage,
+          ...updates,
+          content: newContent,
+          timestamp: Date.now() // Update timestamp when modifying
+        };
+        
+        return {
+          conversationMessages: updatedMessages
+        };
+      }),
+      
+      persistStreamingContent: (content: string) => set((s) => {
+        // Find existing strategy message and replace it, or create new one if none exists
+        const existingStrategyIndex = s.conversationMessages.findIndex(msg => msg.type === 'strategy');
+        
+        const strategyMessage: ConversationMessage = {
+          id: existingStrategyIndex >= 0 ? s.conversationMessages[existingStrategyIndex].id : `strategy-${generateUUID()}`,
+          type: 'strategy',
+          content: content,
+          timestamp: Date.now()
+        };
+        
+        let updatedMessages;
+        if (existingStrategyIndex >= 0) {
+          // Replace existing strategy message
+          updatedMessages = [...s.conversationMessages];
+          updatedMessages[existingStrategyIndex] = strategyMessage;
+        } else {
+          // Add new strategy message
+          updatedMessages = [...s.conversationMessages, strategyMessage];
+        }
+        
+        return {
+          conversationMessages: updatedMessages
+        };
+      }),
+      
+      getLastInitializeMessage: () => {
+        const state = get();
+        // Find the most recent strategy message (used for initialize content)
+        const strategyMessages = state.conversationMessages.filter(msg => msg.type === 'strategy');
+        return strategyMessages.length > 0 ? strategyMessages[strategyMessages.length - 1] : null;
+      },
       
       setApiLoading: (isApiLoading) => set({ isApiLoading }),
       

@@ -677,11 +677,6 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
     
     // Use existing top 25 logic
     const top25Players = filteredData.slice(0, 25);
-    
-    // DEBUG: Log payload structure to confirm diagnosis
-    if (import.meta.env.DEV) {
-      console.log('[DEBUG] Fixing payload structure - adding missing user field');
-    }
 
     const payload = {
       user: getUserId(),
@@ -703,29 +698,22 @@ export const PlayersGrid: React.FC<PlayersGridProps> = ({ toast }) => {
       // Clear previous stream buffer and reset streaming state
       closeAssistantStreaming();
       
-      if (import.meta.env.DEV) {
-        console.info('[init-stream] start');
-      }
-      
       await start(payload, {
         onFirstRealEvent: () => {
-          if (import.meta.env.DEV) {
-            console.info('[init-stream] first real event - opening drawer');
-          }
           openAssistantStreaming();
-          if (import.meta.env.DEV) {
-            console.info('[assistant-ui] open() called');
-          }
         },
         onChunk: (text) => {
           appendAssistantStream(text);
         },
-        onDone: () => {
-          if (import.meta.env.DEV) {
-            console.info('[init-stream] done');
-          }
+        onMessageEnd: () => {
+          // The streaming hook already persists content to the stable message ID
+          // No need to call persistStreamingContent here as it would create duplicates
+          
           finishAssistantStreaming();
           markInitialized(); // Set hasInitializedDraft = true
+        },
+        onDone: () => {
+          // Stream is fully complete, clean up
           setIsInitializing(false);
         },
         onError: (err) => {

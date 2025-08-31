@@ -31,6 +31,7 @@ export interface ConversationMessage {
   type: 'strategy' | 'player-taken' | 'user-turn' | 'loading' | 'analysis';
   content: string;
   timestamp: number;
+  status?: 'streaming' | 'done'; // Track streaming state
   player?: Player; // Associated player for player-taken and user-turn messages
   round?: number; // For user-turn and analysis messages
   pick?: number; // For user-turn and analysis messages

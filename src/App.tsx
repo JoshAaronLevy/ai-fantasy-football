@@ -44,6 +44,8 @@ export default function App() {
       }
       
       // Only fetch if we don't already have players loaded
+      if (players.length > 0) return
+      
       try {
         setPlayersLoading(true)
         setPlayersError(null)
@@ -73,7 +75,7 @@ export default function App() {
     }
 
     loadPlayers()
-  }, [players.length, setPlayers, setPlayersLoading, setPlayersError, setOfflineMode, setShowOfflineBanner])
+  }, [setPlayers, setPlayersLoading, setPlayersError, setOfflineMode, setShowOfflineBanner])
 
   // Show modal on first load if draft is not configured - but only after hydration is complete
   React.useEffect(() => {
@@ -87,9 +89,6 @@ export default function App() {
       <Toast ref={toast} />
       <OfflineBanner toast={toast} />
       <Header onViewAIAnalysis={() => {
-        if (import.meta.env.DEV) {
-          console.info('[assistant-ui] Header open button clicked');
-        }
         // Use store action instead of local state
         useDraftStore.getState().openAssistantStreaming();
       }} />
@@ -104,9 +103,6 @@ export default function App() {
       <AIAnalysisDrawer
         visible={assistantStreaming.isOpen}
         onHide={() => {
-          if (import.meta.env.DEV) {
-            console.info('[assistant-ui] drawer onHide called');
-          }
           closeAssistantStreaming();
         }}
       />

@@ -1,42 +1,18 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import React, { useRef, useState, useEffect, useCallback } from 'react'
+import React, { useState, useRef } from 'react'
 import { Sidebar } from 'primereact/sidebar'
 import { Card } from 'primereact/card'
 import { Tag } from 'primereact/tag'
-import { ScrollPanel } from 'primereact/scrollpanel'
 import { Button } from 'primereact/button'
 import { ProgressSpinner } from 'primereact/progressspinner'
 import { Message } from 'primereact/message'
-import { Accordion, AccordionTab } from 'primereact/accordion'
-import { InputTextarea } from 'primereact/inputtextarea'
 import { useDraftStore } from '../state/draftStore'
 import { MarkdownRenderer } from './common/MarkdownRenderer'
 import { queryBlocking } from '../lib/api'
 import { toSlimPlayer } from '../lib/players/slim'
-import type { ConversationMessage } from '../types'
-
-// ACK message detection function
-function isAckMessage(content: string): boolean {
-  const trimmed = content.trim();
-  return trimmed.indexOf('TAKEN:') === 0 ||
-         trimmed.indexOf('DRAFTED:') === 0 ||
-         trimmed.indexOf('RESET:') === 0;
-}
-
-// ACK chip styling function
-function getAckChipStyles(content: string): string {
-  const trimmed = content.trim();
-  if (trimmed.indexOf('TAKEN:') === 0) {
-    return 'bg-blue-100 text-blue-800 px-3 py-2 rounded-full text-sm inline-block font-medium';
-  }
-  if (trimmed.indexOf('DRAFTED:') === 0) {
-    return 'bg-green-100 text-green-800 px-3 py-2 rounded-full text-sm inline-block font-medium';
-  }
-  if (trimmed.indexOf('RESET:') === 0) {
-    return 'bg-gray-100 text-gray-800 px-3 py-2 rounded-full text-sm inline-block font-medium';
-  }
-  return 'bg-gray-100 text-gray-800 px-3 py-2 rounded-full text-sm inline-block font-medium';
-}
+import { ConversationHistory, type ConversationHistoryRef } from './ai/ConversationHistory'
+import { QueryInput } from './ai/QueryInput'
+import { useStreamingScroll } from '../hooks/useStreamingScroll'
 
 interface QueryEntry {
   id: string;
@@ -53,6 +29,7 @@ interface AIAnalysisDrawerProps {
 }
 
 export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onHide }) => {
+  // Zustand selectors
   const myTeam = useDraftStore((s) => s.myTeam)
   const getTotalDraftedCount = useDraftStore((s) => s.getTotalDraftedCount)
   const conversationId = useDraftStore((s) => s.conversationId)
@@ -68,120 +45,33 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
   const getCurrentRound = useDraftStore((s) => s.getCurrentRound)
   const getCurrentPick = useDraftStore((s) => s.getCurrentPick)
   const selectedPlayers = useDraftStore((s) => s.selectedPlayers)
-  
   // AI Assistant streaming state and actions
   const assistantStreaming = useDraftStore((s) => s.assistantStreaming)
-  const closeAssistantStreaming = useDraftStore((s) => s.closeAssistantStreaming)
-  
-  // Scroll management state and refs
-  const scrollPanelRef = useRef<ScrollPanel>(null)
-  const streamingContentRef = useRef<HTMLDivElement>(null)
-  const [isUserAtBottom, setIsUserAtBottom] = useState(true)
-  const [showScrollButton, setShowScrollButton] = useState(false)
-  const [hasUnreadMessages, setHasUnreadMessages] = useState(false)
-  const [lastSeenMessageCount, setLastSeenMessageCount] = useState(0)
   
   // User query state
-  const [userMessage, setUserMessage] = useState('')
-  const [isSending, setIsSending] = useState(false)
   const [queryEntries, setQueryEntries] = useState<QueryEntry[]>([])
+  
+  // Create a ref for ConversationHistory
+  const conversationHistoryRef = useRef<ConversationHistoryRef>(null)
+  
+  // Use streaming scroll hook to replace scroll management
+  const {
+    onUserScroll,
+    showScrollButton,
+    hasUnreadMessages,
+    scrollToBottom
+  } = useStreamingScroll({
+    messageCount: conversationMessages.length,
+    isVisible: visible,
+    streamingContentLength: assistantStreaming.content.length
+  })
   
   // Get roster players (for display)
   const rosterPlayerIds = Object.keys(myTeam)
   const hasRoster = rosterPlayerIds.length > 0
 
-  // Auto-scroll to bottom function with smooth behavior
-  const scrollToBottom = (smooth = true) => {
-    if (scrollPanelRef.current) {
-      const scrollElement = scrollPanelRef.current.getElement()
-      if (scrollElement) {
-        const scrollContent = scrollElement.querySelector('.p-scrollpanel-content')
-        if (scrollContent) {
-          scrollContent.scrollTo({
-            top: scrollContent.scrollHeight,
-            behavior: smooth ? 'smooth' : 'auto'
-          })
-          setIsUserAtBottom(true)
-          setShowScrollButton(false)
-        }
-      }
-    }
-  }
-
-  // Handle scroll events to detect user position
-  const handleScroll = useCallback(() => {
-    if (scrollPanelRef.current) {
-      const scrollElement = scrollPanelRef.current.getElement()
-      if (scrollElement) {
-        const scrollContent = scrollElement.querySelector('.p-scrollpanel-content')
-        if (scrollContent) {
-          const { scrollTop, scrollHeight, clientHeight } = scrollContent
-          const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10 // 10px threshold
-          setIsUserAtBottom(isAtBottom)
-          setShowScrollButton(!isAtBottom && conversationMessages.length > 0)
-        }
-      }
-    }
-  }, [conversationMessages.length])
-
-  // Auto-scroll when drawer opens
-  useEffect(() => {
-    if (visible && conversationMessages.length > 0) {
-      // Small delay to ensure the drawer is fully rendered
-      setTimeout(() => {
-        // Use smooth scrolling if there are unread messages, otherwise instant
-        const shouldSmoothScroll = hasUnreadMessages
-        scrollToBottom(shouldSmoothScroll)
-        setHasUnreadMessages(false)
-        setLastSeenMessageCount(conversationMessages.length)
-      }, 100)
-    }
-  }, [visible, hasUnreadMessages])
-
-  // Auto-scroll when new messages arrive (only if user is at bottom or drawer is visible)
-  useEffect(() => {
-    if (conversationMessages.length > lastSeenMessageCount) {
-      if (visible) {
-        if (isUserAtBottom) {
-          // User is at bottom, auto-scroll to new message
-          setTimeout(() => scrollToBottom(true), 50)
-        }
-        setLastSeenMessageCount(conversationMessages.length)
-        setHasUnreadMessages(false)
-      } else {
-        // Drawer is closed, mark as having unread messages
-        setHasUnreadMessages(true)
-      }
-    }
-  }, [conversationMessages.length, visible, isUserAtBottom, lastSeenMessageCount])
-
-  // Auto-scroll for streaming content
-  useEffect(() => {
-    if (assistantStreaming.isOpen && streamingContentRef.current) {
-      const element = streamingContentRef.current
-      element.scrollTop = element.scrollHeight
-    }
-  }, [assistantStreaming.content.length, assistantStreaming.isOpen])
-
-  // Set up scroll listener
-  useEffect(() => {
-    if (scrollPanelRef.current) {
-      const scrollElement = scrollPanelRef.current.getElement()
-      if (scrollElement) {
-        const scrollContent = scrollElement.querySelector('.p-scrollpanel-content')
-        if (scrollContent) {
-          scrollContent.addEventListener('scroll', handleScroll)
-          return () => scrollContent.removeEventListener('scroll', handleScroll)
-        }
-      }
-    }
-  }, [conversationMessages.length])
-
-  // Send user query handler
-  const handleSendQuery = async () => {
-    if (!userMessage.trim() || isSending) return
-    
-    setIsSending(true)
+  // Send user query handler - preserve exact behavior
+  const handleSendQuery = async (userMessage: string) => {
     try {
       // Get current draft state
       const currentRound = getCurrentRound()
@@ -239,94 +129,46 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
       // Update query entries
       setQueryEntries(prev => [...prev, newEntry])
       
-      // Clear the input
-      setUserMessage('')
-      
       // Update conversationId if returned
       if (newConversationId) {
         // This would normally update the store but we'll keep it simple for now
       }
       
       // Scroll to bottom after adding new entry
-      setTimeout(() => scrollToBottom(true), 100)
+      setTimeout(() => scrollToBottom(), 100)
       
     } catch (error) {
       console.error('Query failed:', error)
       // Could show toast error here
-    } finally {
-      setIsSending(false)
     }
   }
 
-  const formatTimestamp = (timestamp: number) => {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMins = Math.floor(diffMs / 60000)
-    
-    if (diffMins < 1) return 'Just now'
-    if (diffMins < 60) return `${diffMins}m ago`
-    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`
-    return date.toLocaleDateString()
-  }
-
-  const getMessageIcon = (type: ConversationMessage['type']) => {
-    switch (type) {
-      case 'strategy': return 'pi-lightbulb'
-      case 'player-taken': return 'pi-user-minus'
-      case 'user-turn': return 'pi-user-plus'
-      case 'loading': return 'pi-spin pi-spinner'
-      default: return 'pi-comment'
-    }
-  }
-
-  const getMessageTitle = (type: ConversationMessage['type']) => {
-    switch (type) {
-      case 'strategy': return 'Draft Strategy'
-      case 'player-taken': return 'Player Taken Analysis'
-      case 'user-turn': return 'Your Turn Analysis'
-      case 'loading': return 'Analyzing...'
-      default: return 'AI Analysis'
-    }
-  }
-
-  // Generate accordion title for message
-  const getAccordionTitle = (message: ConversationMessage) => {
-    if (message.type === 'strategy') {
-      return 'Draft Strategy'
-    }
-    
-    if (message.type === 'analysis' && message.meta) {
-      const playerCount = message.meta.playerCount || 'Unknown'
-      return `Round ${message.meta.round} - ${playerCount} Players`
-    }
-    
-    // Fallback for other message types
-    return getMessageTitle(message.type)
-  }
-
-  // Prepare accordion items from messages and query entries
+  // Prepare combined messages for ConversationHistory
   const messageItems = conversationMessages.map((message) => ({
-    type: 'message' as const,
-    message,
-    title: getAccordionTitle(message)
+    ...message,
+    role: 'assistant' as const,
+    ts: message.timestamp
   }))
   
   const queryItems = queryEntries.map((entry) => ({
+    id: entry.id,
+    role: 'assistant' as const,
+    content: entry.ai,
+    ts: entry.createdAt,
     type: 'query' as const,
-    entry,
-    title: `Round ${entry.round}: User Query (${entry.messageNumber})`
+    round: entry.round,
+    messageNumber: entry.messageNumber,
+    user: entry.user,
+    ai: entry.ai
   }))
   
   // Combine and sort by timestamp
-  const allItems = [...messageItems, ...queryItems].sort((a, b) => {
-    const aTime = a.type === 'message' ? a.message.timestamp : a.entry.createdAt
-    const bTime = b.type === 'message' ? b.message.timestamp : b.entry.createdAt
+  const allMessages = [...messageItems, ...queryItems].sort((a, b) => {
+    const aTime = a.ts || Date.now()
+    const bTime = b.ts || Date.now()
     return aTime - bTime
   })
 
-  // Default to only the last accordion item being expanded
-  const defaultActiveIndex = allItems.length > 0 ? [allItems.length - 1] : []
 
   return (
     <Sidebar
@@ -401,58 +243,6 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
           </Card>
         )}
 
-        {/* AI Assistant Streaming Section */}
-        {assistantStreaming.isOpen && (
-          <Card
-            title="AI Assistant - Live Analysis"
-            className="mb-4"
-            style={{ backgroundColor: '#f0f9ff' }}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                {assistantStreaming.isStreaming && (
-                  <ProgressSpinner style={{ width: '20px', height: '20px' }} strokeWidth="4" />
-                )}
-                <span className="text-sm font-medium text-blue-800">
-                  {assistantStreaming.isStreaming ? 'AI is thinking...' : 'Analysis Complete'}
-                </span>
-              </div>
-              <Button
-                icon="pi pi-times"
-                className="p-button-text p-button-sm"
-                onClick={closeAssistantStreaming}
-                tooltip="Close streaming analysis"
-                tooltipOptions={{ position: 'left' }}
-              />
-            </div>
-            
-            <div
-              ref={streamingContentRef}
-              className="max-h-64 overflow-y-auto bg-white p-3 rounded border"
-              style={{ minHeight: '100px' }}
-            >
-              {assistantStreaming.error ? (
-                <div className="text-red-600 text-sm">
-                  <i className="pi pi-exclamation-triangle mr-2"></i>
-                  Error: {assistantStreaming.error}
-                </div>
-              ) : assistantStreaming.content ? (
-                <MarkdownRenderer
-                  content={assistantStreaming.content}
-                  className="prose max-w-none text-sm text-gray-700 leading-relaxed"
-                />
-              ) : assistantStreaming.isStreaming ? (
-                <div className="text-gray-500 text-sm italic">
-                  Building your draft plan...
-                </div>
-              ) : (
-                <div className="text-gray-500 text-sm italic">
-                  No analysis yet.
-                </div>
-              )}
-            </div>
-          </Card>
-        )}
 
         {/* AI Conversation Content */}
         <div className="flex-1">
@@ -508,114 +298,14 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
               </div>
             )}
 
-            {/* Conversation Messages in Accordion */}
-            {conversationMessages.length > 0 && (
+            {/* Conversation Messages */}
+            {allMessages.length > 0 && (
               <div className="h-full flex flex-col relative">
-                <ScrollPanel
-                  ref={scrollPanelRef}
-                  style={{ width: '100%', height: '100%' }}
-                  className="pr-4"
-                >
-                  <Accordion
-                    multiple
-                    activeIndex={defaultActiveIndex}
-                    className="light-theme-accordion"
-                    style={{
-                      '--p-accordion-header-background': '#ffffff',
-                      '--p-accordion-header-hover-background': '#f8f9fa',
-                      '--p-accordion-header-active-background': '#e3f2fd',
-                      '--p-accordion-header-border-color': '#dee2e6',
-                      '--p-accordion-header-color': '#495057',
-                      '--p-accordion-header-hover-color': '#212529',
-                      '--p-accordion-content-background': '#ffffff',
-                      '--p-accordion-content-border-color': '#dee2e6',
-                      '--p-accordion-content-color': '#495057',
-                      '--p-accordion-toggle-icon-color': '#6c757d',
-                      '--p-accordion-toggle-icon-hover-color': '#495057'
-                    } as React.CSSProperties}
-                  >
-                    {allItems.map((item) => (
-                      <AccordionTab
-                        key={item.type === 'message' ? item.message.id : item.entry.id}
-                        header={
-                          <div className="flex items-center justify-between w-full">
-                            <div className="flex items-center gap-2">
-                              <i className={`pi ${item.type === 'message' ? getMessageIcon(item.message.type) : 'pi-comment'} text-blue-600`}></i>
-                              <span className="font-semibold text-gray-800">{item.title}</span>
-                              {item.type === 'message' && item.message.player && (
-                                <Tag
-                                  value={item.message.player.name}
-                                  severity="info"
-                                  className="text-xs"
-                                />
-                              )}
-                            </div>
-                            <span className="text-xs text-gray-500 ml-2">
-                              {formatTimestamp(item.type === 'message' ? item.message.timestamp : item.entry.createdAt)}
-                            </span>
-                          </div>
-                        }
-                        style={{
-                          backgroundColor: '#ffffff',
-                          borderColor: '#dee2e6'
-                        }}
-                        className="light-theme-accordion-tab"
-                      >
-                        <div className="p-4 bg-white border-gray-200">
-                          {item.type === 'message' ? (
-                            <>
-                              {item.message.type === 'loading' ? (
-                                <div className="flex items-center gap-2">
-                                  <ProgressSpinner style={{ width: '20px', height: '20px' }} strokeWidth="4" />
-                                  <span className="text-sm text-gray-600">Analyzing draft situation...</span>
-                                </div>
-                              ) : (
-                                <div className="text-sm text-gray-700 leading-relaxed">
-                                  {isAckMessage(item.message.content) ? (
-                                    <div className={getAckChipStyles(item.message.content)}>
-                                      {item.message.content.trim()}
-                                    </div>
-                                  ) : (
-                                    <MarkdownRenderer
-                                      content={item.message.content}
-                                      className="prose max-w-none text-sm"
-                                    />
-                                  )}
-                                </div>
-                              )}
-                              
-                              {item.message.round && item.message.pick && (
-                                <div className="mt-3 pt-2 border-t border-gray-200">
-                                  <span className="text-xs text-gray-500">
-                                    Round {item.message.round}, Pick {item.message.pick}
-                                  </span>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <div className="space-y-4">
-                              <div>
-                                <div className="text-sm font-medium text-gray-800 mb-2">User:</div>
-                                <div className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                                  {item.entry.user}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-sm font-medium text-blue-800 mb-2">AI Assistant:</div>
-                                <div className="text-sm text-gray-700">
-                                  <MarkdownRenderer
-                                    content={item.entry.ai}
-                                    className="prose max-w-none text-sm"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </AccordionTab>
-                    ))}
-                  </Accordion>
-                </ScrollPanel>
+                <ConversationHistory
+                  messages={allMessages}
+                  onScroll={onUserScroll}
+                  ref={conversationHistoryRef}
+                />
                 
                 {/* Scroll to Latest Button */}
                 {showScrollButton && (
@@ -625,7 +315,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                       className="p-button-rounded p-button-info p-button-sm shadow-lg"
                       tooltip="Scroll to latest message"
                       tooltipOptions={{ position: 'left' }}
-                      onClick={() => scrollToBottom(true)}
+                      onClick={() => scrollToBottom()}
                       style={{
                         backgroundColor: '#3b82f6',
                         borderColor: '#3b82f6',
@@ -649,7 +339,7 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
                         icon="pi pi-arrow-down"
                         label="Latest"
                         className="p-button-text p-button-sm text-xs"
-                        onClick={() => scrollToBottom(true)}
+                        onClick={() => scrollToBottom()}
                         style={{ color: '#6b7280' }}
                       />
                     )}
@@ -676,27 +366,10 @@ export const AIAnalysisDrawer: React.FC<AIAnalysisDrawerProps> = ({ visible, onH
         
         {/* User Query Input - Fixed at bottom */}
         {draftInitialized && (
-          <div className="mt-4 p-4 bg-white border-t border-gray-200">
-            <div className="flex gap-2">
-              <InputTextarea
-                value={userMessage}
-                onChange={(e) => setUserMessage(e.target.value)}
-                placeholder="Ask the AI assistant a question about your draft..."
-                rows={2}
-                autoResize
-                className="flex-1"
-                disabled={isSending}
-              />
-              <Button
-                icon={isSending ? "pi pi-spin pi-spinner" : "pi pi-send"}
-                label="Send"
-                onClick={handleSendQuery}
-                disabled={isSending || !userMessage.trim()}
-                className="p-button-primary"
-                style={{ minWidth: '80px' }}
-              />
-            </div>
-          </div>
+          <QueryInput
+            disabled={isApiLoading}
+            onSubmit={handleSendQuery}
+          />
         )}
       </div>
     </Sidebar>

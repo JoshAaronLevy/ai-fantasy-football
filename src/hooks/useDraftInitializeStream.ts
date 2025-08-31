@@ -1,11 +1,14 @@
 import { useState, useRef, useCallback } from 'react';
+import { useDraftStore } from '../state/draftStore';
+import type { ConversationMessage } from '../types';
 
 export type InitStreamCallbacks = {
   onStart?: () => void;
-  onChunk: (text: string) => void;
+  onChunk?: (text: string) => void; // Made optional since we'll persist directly
   onDone?: () => void;
   onError?: (err: unknown) => void;
   onFirstRealEvent?: () => void;
+  onMessageEnd?: (fullContent: string) => void; // Made optional since we'll persist directly
 };
 
 export function useDraftInitializeStream(): {
@@ -17,6 +20,9 @@ export function useDraftInitializeStream(): {
   const abortControllerRef = useRef<AbortController | null>(null);
   const timeoutRef = useRef<number | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  
+  // Access store methods for persisting streaming content
+  const { addConversationMessage, updateConversationMessage } = useDraftStore();
   
   // StrictMode/double-start protection refs
   const activeRequestIdRef = useRef<string | null>(null);
@@ -30,10 +36,6 @@ export function useDraftInitializeStream(): {
   }, []);
 
   const cleanup = useCallback(() => {
-    if (import.meta.env.DEV) {
-      console.info(`[init-stream] cleanup() - requestId: ${activeRequestIdRef.current || 'none'}`);
-    }
-    
     // Clear timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -58,10 +60,7 @@ export function useDraftInitializeStream(): {
     setIsStreaming(false);
   }, []);
 
-  const cancel = useCallback((reason = 'manual cancel') => {
-    if (import.meta.env.DEV) {
-      console.info(`[init-stream] cancel() - requestId: ${activeRequestIdRef.current || 'none'}, reason: ${reason}`);
-    }
+  const cancel = useCallback(() => {
     cleanup();
   }, [cleanup]);
 
@@ -145,27 +144,18 @@ export function useDraftInitializeStream(): {
     // Generate request ID for tracking
     const requestId = Math.random().toString(36).substr(2, 9);
     
-    if (import.meta.env.DEV) {
-      console.info(`[init-stream] start() - requestId: ${requestId}, timeout: 235000ms`);
-    }
-    
     // StrictMode protection: prevent double-start with same payload
     if (isStartingRef.current) {
-      if (import.meta.env.DEV) console.info('[init-stream] already starting, ignoring duplicate call');
       return;
     }
     
     // Check if already streaming with same payload - don't abort, just ignore
     if (isStreaming && deepEqual(payload, lastPayloadRef.current)) {
-      if (import.meta.env.DEV) console.info('[init-stream] same payload already streaming, ignoring');
       return;
     }
     
     // If different payload and currently streaming, abort current request
     if (isStreaming && !deepEqual(payload, lastPayloadRef.current)) {
-      if (import.meta.env.DEV) {
-        console.info(`[init-stream] different payload, aborting current request - requestId: ${activeRequestIdRef.current || 'none'}`);
-      }
       cleanup();
     }
 
@@ -197,7 +187,6 @@ export function useDraftInitializeStream(): {
 
       // Check if this request is still active (not superseded)
       if (activeRequestIdRef.current !== requestId) {
-        if (import.meta.env.DEV) console.info(`[init-stream] request ${requestId} superseded, aborting`);
         return;
       }
 
@@ -212,7 +201,7 @@ export function useDraftInitializeStream(): {
         // Fallback for no streaming body
         const fullText = await response.text();
         cb.onStart?.();
-        cb.onChunk(fullText);
+        cb.onChunk?.(fullText);
         cb.onDone?.();
         cleanup();
         return;
@@ -223,6 +212,8 @@ export function useDraftInitializeStream(): {
       readerRef.current = reader;
       const decoder = new TextDecoder();
       let hasOpenedDrawer = false;
+      let hasCreatedMessage = false;
+      const STABLE_MESSAGE_ID = 'initialize-latest';
 
       let isStreamComplete = false;
       
@@ -230,7 +221,6 @@ export function useDraftInitializeStream(): {
         while (true) {
           // Check if request is still active before each read
           if (activeRequestIdRef.current !== requestId) {
-            if (import.meta.env.DEV) console.info(`[init-stream] request ${requestId} superseded during streaming`);
             break;
           }
           
@@ -244,10 +234,6 @@ export function useDraftInitializeStream(): {
             const decodedText = decoder.decode(value, { stream: true });
             
             if (decodedText) {
-              if (import.meta.env.DEV) {
-                console.info(`[init-stream] onFirstChunk - bytes: ${decodedText.length}`);
-              }
-              
               // Check for message_end event before parsing content
               const lines = decodedText.split('\n');
               for (const line of lines) {
@@ -258,9 +244,16 @@ export function useDraftInitializeStream(): {
                   const parsed = JSON.parse(trimmedLine);
                   if (parsed && parsed.event === 'message_end') {
                     isStreamComplete = true;
-                    if (import.meta.env.DEV) {
-                      console.info(`[init-stream] onEnd - message_end event received`);
+                    
+                    // Mark the persisted message as done
+                    if (hasCreatedMessage) {
+                      updateConversationMessage(STABLE_MESSAGE_ID, {
+                        status: 'done'
+                      });
                     }
+                    
+                    // Call optional callback
+                    cb.onMessageEnd?.('');
                     break;
                   }
                   
@@ -268,9 +261,6 @@ export function useDraftInitializeStream(): {
                     const errorMsg = parsed.data?.status && parsed.data?.contentType && parsed.data?.bodyPreview
                       ? `HTTP ${parsed.data.status} (${parsed.data.contentType}): ${parsed.data.bodyPreview}`
                       : 'Stream error occurred';
-                    if (import.meta.env.DEV) {
-                      console.info(`[init-stream] onError - ${errorMsg}`);
-                    }
                     cb.onError?.(new Error(errorMsg));
                     return;
                   }
@@ -282,9 +272,36 @@ export function useDraftInitializeStream(): {
               const result = parseStreamChunk(decodedText, () => {
                 if (!hasOpenedDrawer) {
                   hasOpenedDrawer = true;
-                  if (import.meta.env.DEV) console.info(`[init-stream] first real event arrived for request ${requestId}`);
                   cb.onFirstRealEvent?.();
                   cb.onStart?.();
+                  
+                  // Create or reuse the stable message entry in persisted conversation messages
+                  if (!hasCreatedMessage) {
+                    hasCreatedMessage = true;
+                    
+                    // Check if a message with the stable ID already exists
+                    const { conversationMessages } = useDraftStore.getState();
+                    const existingMessage = conversationMessages.find(msg => msg.id === STABLE_MESSAGE_ID);
+                    
+                    if (existingMessage) {
+                      // Reset existing message for new streaming
+                      updateConversationMessage(STABLE_MESSAGE_ID, {
+                        content: '',
+                        timestamp: Date.now(),
+                        status: 'streaming'
+                      });
+                    } else {
+                      // Create new message if none exists
+                      const newMessage: ConversationMessage = {
+                        id: STABLE_MESSAGE_ID,
+                        type: 'strategy',
+                        content: '',
+                        timestamp: Date.now(),
+                        status: 'streaming'
+                      };
+                      addConversationMessage(newMessage);
+                    }
+                  }
                 }
               });
               
@@ -297,12 +314,14 @@ export function useDraftInitializeStream(): {
                 break;
               }
               
-              // Send content to callback
+              // Append content directly to persisted message
               if (result.content) {
-                if (import.meta.env.DEV) {
-                  console.info(`[init-stream] onAppend - bytes: ${result.content.length}`);
-                }
-                cb.onChunk(result.content);
+                cb.onChunk?.(result.content);
+                
+                // Update the persisted message content by appending the new chunk
+                updateConversationMessage(STABLE_MESSAGE_ID, {
+                  content: result.content, // This will be appended by the store implementation
+                });
               }
               
               // If stream is complete, break out of the loop
@@ -311,10 +330,6 @@ export function useDraftInitializeStream(): {
               }
             }
           }
-        }
-
-        if (import.meta.env.DEV) {
-          console.info(`[init-stream] onDone() - requestId: ${requestId}, stream completed successfully`);
         }
         cb.onDone?.();
       } catch (error) {
