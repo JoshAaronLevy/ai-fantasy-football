@@ -110,3 +110,75 @@ export const ResolutionStrategy = {
 
 export type ResolutionStrategy = typeof ResolutionStrategy[keyof typeof ResolutionStrategy];
 
+// Season Mode Types
+export interface SeasonTeam {
+  id: string;
+  name: string;
+  abbreviation: string;
+  logoUrl: string;
+}
+
+export interface RosterPlayer {
+  id: string;
+  name: string;
+  position: string;
+  team: Team;
+  projectedPoints: number | null;
+  isStarter: boolean;
+  slotPosition: 'QB' | 'RB1' | 'RB2' | 'WR1' | 'WR2' | 'TE' | 'FLEX' | 'K' | 'DST' | 'BN1' | 'BN2' | 'BN3' | 'BN4' | 'BN5' | 'BN6' | 'BN7';
+}
+
+export interface SeasonRoster {
+  teamId: string;
+  teamName: string;
+  players: RosterPlayer[];
+  totalProjectedPoints: number;
+  lastUpdated: number;
+}
+
+// API response types for roster data
+export interface ApiRosterPlayer {
+  id: string;
+  name: string;
+  position: string;
+  team: Team;
+  fantasyTeam: string;
+  projectedPoints?: number | null;
+  isStarter?: boolean;
+  slotPosition?: string;
+  [key: string]: unknown; // Allow for additional fields from API
+}
+
+export interface AllPlayersApiResponse {
+  players: ApiRosterPlayer[];
+  teams: SeasonTeam[];
+  lastUpdated: number;
+  [key: string]: unknown; // Allow for additional fields from API
+}
+
+export interface SeasonState {
+  // Mode management
+  currentMode: 'draft' | 'season';
+  
+  // Season-specific data
+  availableTeams: SeasonTeam[];
+  selectedOpponentTeam: SeasonTeam | null;
+  boykiesRoster: SeasonRoster | null;
+  opponentRoster: SeasonRoster | null;
+  
+  // New roster data management
+  allPlayersData: AllPlayersApiResponse | null; // Complete API response
+  myRoster: ApiRosterPlayer[] | null; // Players where fantasyTeam equals "Boykies"
+  opponentRosterData: ApiRosterPlayer[] | null; // Players where fantasyTeam equals selected team
+  
+  // Loading and error states
+  rostersLoading: boolean;
+  rostersError: string | null;
+  teamsLoading: boolean;
+  teamsError: string | null;
+  
+  // Cache management
+  rosterCache: Record<string, SeasonRoster>;
+  lastCacheUpdate: number;
+}
+

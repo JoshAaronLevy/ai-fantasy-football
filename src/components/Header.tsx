@@ -3,6 +3,7 @@ import { Toolbar } from 'primereact/toolbar'
 import { Button } from 'primereact/button'
 import { Tag } from 'primereact/tag'
 import { useDraftStore } from '../state/draftStore'
+import { ModeToggle } from './common/ModeToggle'
 
 interface HeaderProps {
   onViewAIAnalysis?: () => void;
@@ -15,7 +16,7 @@ export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
       <div>
         <span style={{ fontSize: '1.75rem' }}>🏈</span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <h1 style={{
           fontSize: 'clamp(1.25rem, 2.5vw, 1.5rem)',
           fontWeight: '600',
@@ -25,6 +26,7 @@ export const Header: React.FC<HeaderProps> = ({ onViewAIAnalysis }) => {
         }}>
           Boykies Fantasy Football
         </h1>
+        <ModeToggle />
         {isOfflineMode && (
           <Tag
             value="Offline"

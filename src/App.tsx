@@ -5,7 +5,8 @@ import { PlayersGrid } from './components/PlayersGrid'
 import { DraftConfigModal } from './components/DraftConfigModal'
 import { AIAnalysisDrawer } from './components/AIAnalysisDrawer'
 import { OfflineBanner } from './components/OfflineBanner'
-import { useDraftStore } from './state/draftStore'
+import { SeasonModeContainer } from './components/season/SeasonModeContainer'
+import { useDraftStore, useSeasonStore } from './state'
 import { fetchPlayers } from './lib/api'
 import { FORCE_OFFLINE_MODE } from './lib/debug/devFlags'
 
@@ -20,6 +21,7 @@ export default function App() {
   const setShowOfflineBanner = useDraftStore((s) => s.setShowOfflineBanner)
   const assistantStreaming = useDraftStore((s) => s.assistantStreaming)
   const closeAssistantStreaming = useDraftStore((s) => s.closeAssistantStreaming)
+  const currentMode = useSeasonStore((s) => s.currentMode)
   
   const [showConfigModal, setShowConfigModal] = React.useState(false)
   
@@ -93,7 +95,11 @@ export default function App() {
         useDraftStore.getState().openAssistantStreaming();
       }} />
       <main className="custom-main">
-        <PlayersGrid toast={toast} />
+        {currentMode === 'draft' ? (
+          <PlayersGrid toast={toast} />
+        ) : (
+          <SeasonModeContainer toast={toast} />
+        )}
       </main>
       <DraftConfigModal
         visible={showConfigModal}

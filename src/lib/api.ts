@@ -494,3 +494,30 @@ export async function queryBlocking(params: {
     conversationId: res?.conversationId
   };
 }
+
+/**
+ * Fetch all rosters data for Season Mode from the /api/roster/allPlayers endpoint
+ * @returns Promise resolving to roster data for all teams
+ */
+export async function fetchAllRosters(): Promise<any> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  
+  try {
+    const res = await fetch('/api/roster/allPlayers', {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    
+    if (!res.ok) {
+      throw new Error(`Failed to fetch rosters: ${res.status}`);
+    }
+    return res.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Request timed out while fetching rosters');
+    }
+    throw err;
+  }
+}

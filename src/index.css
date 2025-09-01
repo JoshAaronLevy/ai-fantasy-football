@@ -650,3 +650,199 @@ body {
 .p-dialog-header {
   text-align: center !important;
 }
+
+/* Season Mode Styles */
+.season-container {
+  padding: 1rem;
+  max-width: 95vw;
+  margin: 0 auto;
+}
+
+.season-header {
+  margin-bottom: 1.5rem;
+}
+
+.roster-comparison {
+  width: 100%;
+}
+
+.roster-comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 1024px) {
+  .roster-comparison-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+  }
+  
+  .season-container {
+    max-width: 90vw;
+  }
+}
+
+@media (min-width: 1280px) {
+  .season-container {
+    max-width: 1200px;
+  }
+}
+
+.roster-table-container {
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.roster-table-header {
+  background: linear-gradient(to right, #002244, #0073CF);
+  color: white;
+  padding: 1rem;
+  text-align: center;
+}
+
+.roster-data-table {
+  border: none !important;
+}
+
+.roster-data-table .p-datatable-thead > tr > th {
+  background: #f8fafc !important;
+  color: #334155 !important;
+  border-bottom: 2px solid #e2e8f0 !important;
+  padding: 0.75rem 0.5rem !important;
+  font-weight: 600 !important;
+  font-size: 0.875rem !important;
+}
+
+.roster-data-table .p-datatable-tbody > tr > td {
+  padding: 0.5rem !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  vertical-align: middle !important;
+}
+
+.roster-data-table .p-datatable-tbody > tr:nth-child(odd) {
+  background: #f8fafc !important;
+}
+
+.roster-data-table .p-datatable-tbody > tr:hover {
+  background: #f1f5f9 !important;
+}
+
+.position-badge {
+  background: #f1f5f9;
+  color: #475569;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: inline-block;
+  min-width: 40px;
+  text-align: center;
+}
+
+.player-info {
+  line-height: 1.3;
+}
+
+.team-logo {
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.team-logo-sm {
+  width: 20px;
+  height: 20px;
+}
+
+.team-logo-md {
+  width: 24px;
+  height: 24px;
+}
+
+.team-logo-lg {
+  width: 32px;
+  height: 32px;
+}
+
+.team-fallback {
+  background: #e2e8f0;
+  color: #475569;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.625rem;
+}
+
+.team-fallback-sm {
+  width: 20px;
+  height: 20px;
+  font-size: 0.5rem;
+}
+
+.team-fallback-md {
+  width: 24px;
+  height: 24px;
+  font-size: 0.625rem;
+}
+
+.team-fallback-lg {
+  width: 32px;
+  height: 32px;
+  font-size: 0.75rem;
+}
+
+.mode-toggle .p-togglebutton {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  color: white !important;
+  transition: all 0.2s ease !important;
+}
+
+.mode-toggle .p-togglebutton:not(.p-disabled):not(.p-highlight):hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.mode-toggle .p-togglebutton.p-highlight {
+  background: #FFB612 !important;
+  color: #002244 !important;
+  border-color: #FFB612 !important;
+}
+
+.mode-toggle .p-togglebutton.p-highlight:hover {
+  background: #e6a10a !important;
+  border-color: #e6a10a !important;
+}
+
+.team-selector-dropdown {
+  min-width: 200px;
+}
+
+.team-selector-dropdown .p-dropdown-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Responsive adjustments for Season Mode */
+@media (max-width: 1023px) {
+  .season-header .flex {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .roster-table-container {
+    font-size: 0.8rem;
+  }
+  
+  .roster-data-table .p-datatable-thead > tr > th,
+  .roster-data-table .p-datatable-tbody > tr > td {
+    padding: 0.4rem !important;
+  }
+}
