@@ -1,3 +1,34 @@
+// API Response Types for Roster with Matchups
+export interface TeamRef {
+  abbr: string;
+  logoUrl?: string;
+  city?: string;
+  name?: string;
+}
+
+export interface RosterMatchup {
+  week: number;
+  type?: 'home' | 'away';
+  opponent?: TeamRef;
+  kickoff?: string;
+  projectedScore?: string;
+  finalScore?: string;
+  bye?: boolean;
+  projectedPoints?: number;
+}
+
+export interface RosterApiPlayer {
+  id?: string;
+  name: string;
+  position?: string;
+  pos?: string;
+  fantasyTeam?: { owner?: string; name?: string; endpoint?: string };
+  team: { abbr: string; logoUrl?: string } | string;
+  starter?: boolean;
+  matchup?: RosterMatchup;
+  projectedPoints?: number;
+}
+
 export interface Team {
   abbr: string;
   logoUrl: string;
@@ -126,6 +157,8 @@ export interface RosterPlayer {
   projectedPoints: number | null;
   isStarter: boolean;
   slotPosition: 'QB' | 'RB1' | 'RB2' | 'WR1' | 'WR2' | 'TE' | 'FLEX' | 'K' | 'DST' | 'BN1' | 'BN2' | 'BN3' | 'BN4' | 'BN5' | 'BN6' | 'BN7';
+  matchup?: Matchup;
+  opponent?: string;
 }
 
 export interface SeasonRoster {
@@ -134,6 +167,16 @@ export interface SeasonRoster {
   players: RosterPlayer[];
   totalProjectedPoints: number;
   lastUpdated: number;
+}
+
+// Matchup type for schedule data
+export interface Matchup {
+  id: number;
+  homeTeam: string;
+  awayTeam: string;
+  kickoff: string;
+  projectedScore: string;
+  finalScore: string;
 }
 
 // API response types for roster data
@@ -146,6 +189,7 @@ export interface ApiRosterPlayer {
   projectedPoints?: number | null;
   isStarter?: boolean;
   slotPosition?: string;
+  matchup?: Matchup; // Optional matchup field for schedule data
   [key: string]: unknown; // Allow for additional fields from API
 }
 
@@ -166,11 +210,6 @@ export interface SeasonState {
   boykiesRoster: SeasonRoster | null;
   opponentRoster: SeasonRoster | null;
   
-  // New roster data management
-  allPlayersData: AllPlayersApiResponse | null; // Complete API response
-  myRoster: ApiRosterPlayer[] | null; // Players where fantasyTeam equals "Boykies"
-  opponentRosterData: ApiRosterPlayer[] | null; // Players where fantasyTeam equals selected team
-  
   // Loading and error states
   rostersLoading: boolean;
   rostersError: string | null;
@@ -178,7 +217,7 @@ export interface SeasonState {
   teamsError: string | null;
   
   // Cache management
-  rosterCache: Record<string, SeasonRoster>;
   lastCacheUpdate: number;
+  rosterCache: Record<string, RosterApiPlayer[]>;
 }
 

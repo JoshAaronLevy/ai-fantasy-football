@@ -1,4 +1,4 @@
-import type { ApiRosterPlayer } from '../../types';
+import type { ApiRosterPlayer, Matchup } from '../../types';
 
 export const LINEUP_POSITIONS = ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DST', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN'] as const;
 
@@ -10,9 +10,11 @@ export interface ShapedRow {
   teamLogoUrl?: string;
   projPoints?: number | null;
   isStarter: boolean; // false for BN rows
+  opponent?: string; // Opponent abbreviation for display (e.g., "vs NYG", "@LAR")
+  matchup?: Matchup; // Full matchup object containing schedule details
 }
 
-export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {
+export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {  
   // Create a copy to avoid mutating the original array
   const availablePlayers = [...players];
   const shapedRows: ShapedRow[] = [];
@@ -29,7 +31,15 @@ export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {
       };
     }
     
-    return {
+    // Determine opponent display if matchup is available
+    let opponent: string | undefined;
+    if (player.matchup && player.team?.abbr) {
+      const isHome = player.matchup.homeTeam === player.team.abbr;
+      const opponentTeam = isHome ? player.matchup.awayTeam : player.matchup.homeTeam;
+      opponent = isHome ? opponentTeam : `@${player.matchup.homeTeam}`;
+    }
+    
+    const row = {
       slotPosition,
       name: player.name,
       position: player.position,
@@ -37,7 +47,11 @@ export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {
       teamLogoUrl: player.team?.logoUrl,
       projPoints: player.projectedPoints ?? null,
       isStarter: slotPosition !== 'BN',
+      matchup: player.matchup, // Pass through the matchup data if available
+      opponent: opponent || (player.opponent as string | undefined), // Use computed opponent, fallback to original
     };
+
+    return row;
   };
   
   // Helper to find and remove a player from available list

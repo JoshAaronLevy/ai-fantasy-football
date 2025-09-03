@@ -1,90 +1,20 @@
 import React from 'react'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
-import type { ShapedRow } from '../../season/lib/shapeLineup'
+import type { RosterApiPlayer } from '../../types'
 
 interface RosterTableProps {
-  rows: ShapedRow[];
+  userRoster: RosterApiPlayer[];
   teamName: string;
 }
 
-export const RosterTable: React.FC<RosterTableProps> = ({ rows, teamName }) => {
+export const RosterTable: React.FC<RosterTableProps> = ({ userRoster, teamName }) => {
+  // Ensure userRoster is always an array to prevent TypeError
+  const safeUserRoster = Array.isArray(userRoster) ? userRoster : []
 
-  const positionTemplate = (rowData: ShapedRow) => {
-    return (
-      <span className="position-badge">
-        {rowData.slotPosition}
-      </span>
-    )
-  }
-
-  const playerTemplate = (rowData: ShapedRow) => {
-    if (rowData.name === '---') {
-      return (
-        <span className="text-gray-400 italic">
-          {rowData.slotPosition === 'BN' ? 'Empty' : `No ${rowData.slotPosition} Player`}
-        </span>
-      )
-    }
-
-    return (
-      <div className="player-info">
-        <div className="font-semibold">{rowData.name}</div>
-      </div>
-    )
-  }
-
-  const teamTemplate = (rowData: ShapedRow) => {
-    if (!rowData.teamAbbr || rowData.teamAbbr === '---') {
-      return <span className="text-gray-400">---</span>
-    }
-
-    return (
-      <div className="flex items-center justify-center">
-        {rowData.teamLogoUrl ? (
-          <>
-            <img
-              src={rowData.teamLogoUrl}
-              alt={`${rowData.teamAbbr} logo`}
-              className="team-logo team-logo-sm"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement
-                target.style.display = 'none'
-                const fallback = target.nextElementSibling as HTMLElement
-                if (fallback) {
-                  fallback.style.display = 'flex'
-                }
-              }}
-            />
-            <div
-              className="team-fallback team-fallback-sm"
-              style={{ display: 'none' }}
-            >
-              {rowData.teamAbbr}
-            </div>
-          </>
-        ) : (
-          <span>{rowData.teamAbbr}</span>
-        )}
-      </div>
-    )
-  }
-
-  const projectionTemplate = (rowData: ShapedRow) => {
-    if (rowData.projPoints === null || rowData.projPoints === undefined) {
-      return <span className="text-gray-400">-</span>
-    }
-
-    return (
-      <span className="font-semibold">
-        {rowData.projPoints.toFixed(1)}
-      </span>
-    )
-  }
-
-  // Calculate total projected points from rows
-  const totalProjectedPoints = rows.reduce((total, row) => {
-    return total + (row.projPoints || 0)
+  // Calculate total projected points from roster
+  const totalProjectedPoints = safeUserRoster.reduce((total, player) => {
+    return total + (player.matchup?.projectedPoints ?? 0)
   }, 0)
 
   return (
@@ -99,40 +29,71 @@ export const RosterTable: React.FC<RosterTableProps> = ({ rows, teamName }) => {
       </div>
       
       <DataTable
-        value={rows}
+        value={safeUserRoster}
+        dataKey="name"
         size="small"
         className="roster-data-table"
         stripedRows
         showGridlines={false}
         style={{ fontSize: '0.875rem' }}
       >
-        <Column 
-          field="slotPosition" 
-          header="Pos" 
-          body={positionTemplate}
+        <Column
+          header="Pos"
+          body={(player) => player.position ?? player.pos}
           style={{ width: '60px', textAlign: 'center' }}
           headerStyle={{ width: '60px', textAlign: 'center' }}
         />
-        
-        <Column 
-          field="name" 
-          header="Player" 
-          body={playerTemplate}
+
+        <Column
+          header="Player"
+          body={(player) => player.name}
           style={{ minWidth: '180px' }}
         />
         
-        <Column 
-          field="team" 
-          header="Team" 
-          body={teamTemplate}
+        <Column
+          header="Team"
+          body={(player) => {
+            const team = typeof player.team === 'string'
+              ? { abbr: player.team, logoUrl: undefined }
+              : player.team;
+            return (
+              <img
+                src={team?.logoUrl ?? ''}
+                alt={team?.abbr ?? ''}
+                width={32}
+                height={32}
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                }}
+              />
+            );
+          }}
           style={{ width: '60px', textAlign: 'center' }}
           headerStyle={{ width: '60px', textAlign: 'center' }}
         />
-        
+
         <Column
-          field="projPoints"
-          header="Proj. Points"
-          body={projectionTemplate}
+          header="Opponent"
+          body={(player) => (
+            <img
+              src={player.matchup?.opponent?.logoUrl ?? ''}
+              alt={player.matchup?.opponent?.abbr ?? ''}
+              width={32}
+              height={32}
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+              }}
+            />
+          )}
+          style={{ width: '70px', textAlign: 'center' }}
+          headerStyle={{ width: '70px', textAlign: 'center' }}
+        />
+
+        <Column
+          header="Proj"
+          body={(player) => (player.matchup?.projectedPoints ?? 0).toFixed(2)}
           style={{ width: '80px', textAlign: 'right' }}
           headerStyle={{ width: '80px', textAlign: 'right' }}
         />

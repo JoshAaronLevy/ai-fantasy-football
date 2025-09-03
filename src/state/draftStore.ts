@@ -2,8 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Player, ConversationMessage, QueuedAction, ActionQueueState, DraftConfiguration, SeasonState, SeasonTeam, SeasonRoster, AllPlayersApiResponse, ApiRosterPlayer } from '../types'
 import { generateUUID } from '../lib/uuid'
-import { fetchAllRosters } from '../lib/api'
-import { extractTeams, extractTeamRoster, extractTeamsFromFlatData } from '../lib/roster/rosterProcessor'
+import { getJSON, setJSON } from '../lib/storage/localStore'
 
 type DraftAction = {
   id: string;
@@ -166,10 +165,6 @@ type DraftState = {
   setRostersError: (error: string | null) => void;
   setTeamsLoading: (loading: boolean) => void;
   setTeamsError: (error: string | null) => void;
-  updateRosterCache: (teamId: string, roster: SeasonRoster) => void;
-  clearRosterCache: () => void;
-  getRosterFromCache: (teamId: string) => SeasonRoster | null;
-  isCacheValid: (teamId: string, maxAgeMs?: number) => boolean;
   initializeSeasonMode: () => Promise<void>;
   fetchAvailableTeams: () => Promise<void>;
   fetchRosterComparison: (opponentTeamId: string) => Promise<void>;
@@ -1333,30 +1328,7 @@ export const useDraftStore = create<DraftState>()(
         season: { ...s.season, teamsError: error }
       })),
 
-      updateRosterCache: (teamId, roster) => set((s) => ({
-        season: {
-          ...s.season,
-          rosterCache: { ...s.season.rosterCache, [teamId]: roster },
-          lastCacheUpdate: Date.now()
-        }
-      })),
-
-      clearRosterCache: () => set((s) => ({
-        season: { ...s.season, rosterCache: {}, lastCacheUpdate: 0 }
-      })),
-
-      getRosterFromCache: (teamId) => {
-        const { season } = get();
-        return season.rosterCache[teamId] || null;
-      },
-
-      isCacheValid: (teamId, maxAgeMs = 5 * 60 * 1000) => {
-        const { season } = get();
-        const roster = season.rosterCache[teamId];
-        if (!roster) return false;
-        const age = Date.now() - roster.lastUpdated;
-        return age <= maxAgeMs;
-      },
+      // Removed roster cache methods - these are now handled by seasonStore
 
       initializeSeasonMode: async () => {
         const store = get();
@@ -1365,45 +1337,10 @@ export const useDraftStore = create<DraftState>()(
           store.setTeamsError(null);
           
           try {
-            // Try to fetch all roster data from API
-            const rawData = await fetchAllRosters();
-            
-            // Enhanced console logging of the API response
-            console.log('🏈 GET /roster/allPlayers API Response:');
-            console.log('📊 Full response:', JSON.stringify(rawData, null, 2));
-            console.log('📈 Response structure analysis:');
-            console.log('  - Response type:', typeof rawData);
-            console.log('  - Response keys:', Object.keys(rawData || {}));
-            
-            if (rawData && typeof rawData === 'object') {
-              // Check if it has a players array
-              if ('players' in rawData) {
-                console.log('  - Players array found, length:', Array.isArray(rawData.players) ? rawData.players.length : 'not an array');
-                if (Array.isArray(rawData.players) && rawData.players.length > 0) {
-                  console.log('  - Sample player:', JSON.stringify(rawData.players[0], null, 2));
-                }
-              }
-              
-              // Check if it has a data array (alternative structure)
-              if ('data' in rawData) {
-                console.log('  - Data array found, length:', Array.isArray(rawData.data) ? rawData.data.length : 'not an array');
-                if (Array.isArray(rawData.data) && rawData.data.length > 0) {
-                  console.log('  - Sample data item:', JSON.stringify(rawData.data[0], null, 2));
-                }
-              }
-            }
-            
-            // Extract teams from the API response using the correct function for the flat data format
-            const teams = extractTeamsFromFlatData(rawData);
-            store.setAvailableTeams(teams);
-            
-            // Set Boykies roster as default if available
-            const boykiesTeam = teams.find(t => t.id === 'boykies');
-            if (boykiesTeam) {
-              await store.fetchRosterComparison('boykies');
-            }
+            // Legacy API is no longer available, fallback to mock data immediately
+            throw new Error('Legacy /roster/allPlayers endpoint removed');
           } catch (apiError) {
-            console.warn('API not available, falling back to mock data:', apiError);
+            console.warn('Legacy API not available, falling back to mock data:', apiError);
             
             // Fall back to mock teams data when API is not available
             const mockTeams = [
@@ -1438,14 +1375,10 @@ export const useDraftStore = create<DraftState>()(
           store.setTeamsError(null);
           
           try {
-            // Try to fetch all roster data from API
-            const rawData = await fetchAllRosters();
-            
-            // Extract and set teams
-            const teams = extractTeams(rawData);
-            store.setAvailableTeams(teams);
+            // Legacy API is no longer available, fallback to mock data immediately
+            throw new Error('Legacy /roster/allPlayers endpoint removed');
           } catch (apiError) {
-            console.warn('API not available, falling back to mock data:', apiError);
+            console.warn('Legacy API not available, falling back to mock data:', apiError);
             
             // Fall back to mock teams data when API is not available
             const mockTeams = [
@@ -1473,38 +1406,14 @@ export const useDraftStore = create<DraftState>()(
           store.setRostersLoading(true);
           store.setRostersError(null);
 
-          // Check cache first
-          const cachedRoster = store.getRosterFromCache(opponentTeamId);
-          if (cachedRoster && store.isCacheValid(opponentTeamId)) {
-            if (opponentTeamId === 'boykies') {
-              store.setBoykiesRoster(cachedRoster);
-            } else {
-              store.setOpponentRoster(cachedRoster);
-            }
-            return;
-          }
+          // Cache checking is now handled by seasonStore
+          // Skip cache checking in draftStore since seasonStore handles it
 
           let teamRoster: SeasonRoster | null = null;
 
           try {
-            // Try to fetch all roster data from API
-            const rawData = await fetchAllRosters();
-            
-            // Extract the specific team's roster
-            teamRoster = extractTeamRoster(rawData, opponentTeamId);
-            
-            if (!teamRoster) {
-              throw new Error(`Team roster not found for ${opponentTeamId}`);
-            }
-
-            // Find and set the selected opponent team from API data
-            if (opponentTeamId !== 'boykies') {
-              const teams = extractTeams(rawData);
-              const opponentTeam = teams.find(t => t.id === opponentTeamId);
-              if (opponentTeam) {
-                store.setSelectedOpponentTeam(opponentTeam);
-              }
-            }
+            // This draftStore method is deprecated - use seasonStore instead
+            throw new Error('Use seasonStore.fetchRosterComparison instead');
           } catch (apiError) {
             console.warn('API not available, falling back to mock roster data:', apiError);
             
@@ -1552,8 +1461,7 @@ export const useDraftStore = create<DraftState>()(
           }
 
           if (teamRoster) {
-            // Cache the roster
-            store.updateRosterCache(opponentTeamId, teamRoster);
+            // Roster caching is now handled by seasonStore
 
             // Set the appropriate roster
             if (opponentTeamId === 'boykies') {
@@ -1660,26 +1568,24 @@ export const useDraftStore = create<DraftState>()(
       loadRosterDataFromStorage: () => {
         const store = get();
         try {
-          // Load allPlayersData
-          const allPlayersDataStr = localStorage.getItem('allPlayersData');
+          // Load allPlayersData using utility (namespaced key for draft mode)
+          const allPlayersData = getJSON('draft.allPlayersData', null);
 
-          if (allPlayersDataStr) {
-            const allPlayersData = JSON.parse(allPlayersDataStr);
+          if (allPlayersData) {
             store.setAllPlayersData(allPlayersData);
 
             // Extract and set myRoster
             const myRoster = store.extractMyRoster(allPlayersData);
             store.setMyRoster(myRoster);
           } else {
-            console.log('💾 No allPlayersData found in localStorage');
+            console.log('💾 No draft allPlayersData found in localStorage');
           }
 
-          // Load opponentRoster
-          const opponentRosterStr = localStorage.getItem('opponentRoster');
-          if (opponentRosterStr) {
-            const opponentRoster = JSON.parse(opponentRosterStr);
+          // Load opponentRoster using utility (namespaced key for draft mode)
+          const opponentRoster = getJSON('draft.opponentRoster', null);
+          if (opponentRoster) {
             store.setOpponentRosterData(opponentRoster);
-            console.log('🏠 Site load - opponentRoster:', opponentRoster);
+            console.log('🏠 Site load - draft opponentRoster:', opponentRoster);
           }
         } catch (error) {
           console.error('💾 Failed to load roster data from storage:', error);
@@ -1688,7 +1594,7 @@ export const useDraftStore = create<DraftState>()(
 
       saveAllPlayersDataToStorage: (data) => {
         try {
-          localStorage.setItem('allPlayersData', JSON.stringify(data));
+          setJSON('draft.allPlayersData', data);
         } catch (error) {
           console.error('Failed to save all players data to storage:', error);
         }
@@ -1696,7 +1602,7 @@ export const useDraftStore = create<DraftState>()(
 
       saveOpponentRosterToStorage: (roster) => {
         try {
-          localStorage.setItem('opponentRoster', JSON.stringify(roster));
+          setJSON('draft.opponentRoster', roster);
         } catch (error) {
           console.error('Failed to save opponent roster to storage:', error);
         }

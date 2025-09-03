@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { SeasonState, SeasonTeam, SeasonRoster, AllPlayersApiResponse, ApiRosterPlayer, RosterPlayer } from '../types'
-import { fetchAllRosters } from '../lib/api'
-import { fetchAllPlayers } from '../lib/api/season'
-import { extractTeams, extractTeamRoster, extractTeamsFromFlatData } from '../lib/roster/rosterProcessor'
+import type { SeasonState, SeasonTeam, SeasonRoster, RosterApiPlayer, RosterPlayer } from '../types'
+import { fetchRosterWithMatchups, fetchSchedule, ensureProjectedPoints } from '../lib/api/season'
+import { getTeamByAbbr } from '../lib/teams/nflTeams'
+import { getJSON, setJSON } from '../lib/storage/localStore'
 
 type SeasonStore = SeasonState & {
   // Mode management actions
@@ -15,7 +15,13 @@ type SeasonStore = SeasonState & {
   setAvailableTeams: (teams: SeasonTeam[]) => void;
   setSelectedOpponentTeam: (team: SeasonTeam | null) => void;
   
+  // Week management actions
+  selectedWeek: number;
+  setSelectedWeek: (week: number) => void;
+  
   // Roster management actions
+  userRoster: RosterApiPlayer[] | null;
+  setUserRoster: (roster: RosterApiPlayer[] | null) => void;
   setBoykiesRoster: (roster: SeasonRoster | null) => void;
   setOpponentRoster: (roster: SeasonRoster | null) => void;
   setRostersLoading: (loading: boolean) => void;
@@ -24,32 +30,32 @@ type SeasonStore = SeasonState & {
   setTeamsError: (error: string | null) => void;
   
   // Cache management actions
-  updateRosterCache: (teamId: string, roster: SeasonRoster) => void;
+  rosterCache: Record<string, RosterApiPlayer[]>;
+  updateRosterCache: (teamId: string, roster: RosterApiPlayer[]) => void;
   clearRosterCache: () => void;
-  getRosterFromCache: (teamId: string) => SeasonRoster | null;
-  isCacheValid: (teamId: string, maxAgeMs?: number) => boolean;
+  getRosterFromCache: (teamId: string) => RosterApiPlayer[] | null;
   
   // Data fetching actions
   initializeSeasonMode: () => Promise<void>;
   fetchAvailableTeams: () => Promise<void>;
   fetchRosterComparison: (opponentTeamId: string) => Promise<void>;
+  fetchUserRoster: () => Promise<void>;
   
-  // New roster data management actions
-  setAllPlayersData: (data: AllPlayersApiResponse | null) => void;
-  setMyRoster: (roster: ApiRosterPlayer[] | null) => void;
-  setOpponentRosterData: (roster: ApiRosterPlayer[] | null) => void;
-  extractMyRoster: (allPlayersData: AllPlayersApiResponse) => ApiRosterPlayer[];
-  extractOpponentRoster: (allPlayersData: AllPlayersApiResponse, teamName: string) => ApiRosterPlayer[];
+  // Storage actions
   loadRosterDataFromStorage: () => void;
-  saveAllPlayersDataToStorage: (data: AllPlayersApiResponse) => void;
-  saveOpponentRosterToStorage: (roster: ApiRosterPlayer[]) => void;
+  saveUserRosterToStorage: (roster: RosterApiPlayer[]) => void;
+  validateRosterFormat: (roster: unknown) => roster is RosterApiPlayer[];
+  cleanupLegacyRosterData: () => void;
   
-  // New Season API state and actions
-  allPlayers: ApiRosterPlayer[];
-  allPlayersLoading: boolean;
-  allPlayersError: string | null;
-  lastFetchedAt: number | null;
-  fetchAllPlayers: (force?: boolean) => Promise<void>;
+  // Schedule state and actions
+  scheduleData: unknown | null;
+  scheduleLoading: boolean;
+  scheduleError: string | null;
+  scheduleCache: Record<number, { data: unknown; timestamp: number }>;
+  setScheduleLoading: (loading: boolean) => void;
+  setScheduleError: (error: string | null) => void;
+  fetchScheduleData: (weekNumber: number) => Promise<void>;
+  loadInitialSchedule: () => Promise<void>;
 }
 
 export const useSeasonStore = create<SeasonStore>()(
@@ -61,21 +67,24 @@ export const useSeasonStore = create<SeasonStore>()(
       selectedOpponentTeam: null,
       boykiesRoster: null,
       opponentRoster: null,
-      allPlayersData: null,
-      myRoster: null,
-      opponentRosterData: null,
+      userRoster: null,
       rostersLoading: false,
       rostersError: null,
       teamsLoading: false,
       teamsError: null,
       rosterCache: {},
       lastCacheUpdate: 0,
+      selectedWeek: (() => {
+        // Initialize from localStorage using utility
+        const savedWeek = getJSON<number>('seasonSelectedWeek', 1);
+        return savedWeek;
+      })(),
       
-      // New Season API state
-      allPlayers: [],
-      allPlayersLoading: false,
-      allPlayersError: null,
-      lastFetchedAt: null,
+      // Schedule state
+      scheduleData: null,
+      scheduleLoading: false,
+      scheduleError: null,
+      scheduleCache: {},
 
       // Mode management actions
       setCurrentMode: (mode) => set({ currentMode: mode }),
@@ -89,7 +98,27 @@ export const useSeasonStore = create<SeasonStore>()(
 
       setSelectedOpponentTeam: (team) => set({ selectedOpponentTeam: team }),
 
+      // Week management actions
+      setSelectedWeek: async (week) => {
+        const store = get();
+        setJSON('seasonSelectedWeek', week);
+        set({ selectedWeek: week });
+        
+        // Fetch schedule data for the new week
+        await store.fetchScheduleData(week);
+        
+        // Re-fetch current rosters to update with new schedule data
+        if (store.boykiesRoster) {
+          await store.fetchRosterComparison('boykies');
+        }
+        if (store.selectedOpponentTeam) {
+          await store.fetchRosterComparison(store.selectedOpponentTeam.id);
+        }
+      },
+
       // Roster management actions
+      setUserRoster: (roster) => set({ userRoster: roster }),
+
       setBoykiesRoster: (roster) => set({ boykiesRoster: roster }),
 
       setOpponentRoster: (roster) => set({ opponentRoster: roster }),
@@ -104,23 +133,14 @@ export const useSeasonStore = create<SeasonStore>()(
 
       // Cache management actions
       updateRosterCache: (teamId, roster) => set((state) => ({
-        rosterCache: { ...state.rosterCache, [teamId]: roster },
-        lastCacheUpdate: Date.now()
+        rosterCache: { ...state.rosterCache, [teamId]: roster }
       })),
 
-      clearRosterCache: () => set({ rosterCache: {}, lastCacheUpdate: 0 }),
+      clearRosterCache: () => set({ rosterCache: {} }),
 
       getRosterFromCache: (teamId) => {
         const state = get();
         return state.rosterCache[teamId] || null;
-      },
-
-      isCacheValid: (teamId, maxAgeMs = 5 * 60 * 1000) => {
-        const state = get();
-        const roster = state.rosterCache[teamId];
-        if (!roster) return false;
-        const age = Date.now() - roster.lastUpdated;
-        return age <= maxAgeMs;
       },
 
       // Data fetching actions
@@ -131,46 +151,26 @@ export const useSeasonStore = create<SeasonStore>()(
           store.setTeamsError(null);
           
           try {
-            // Fetch all players using the new Season API
-            await store.fetchAllPlayers(true); // Force fetch on initialization
+            // Fetch user roster first
+            await store.fetchUserRoster();
             
-            if (store.allPlayers.length > 0) {
-              // Extract teams from the fetched players data
-              const uniqueTeams = new Map<string, SeasonTeam>();
-              
-              store.allPlayers.forEach(player => {
-                if (player.fantasyTeam && !uniqueTeams.has(player.fantasyTeam)) {
-                  uniqueTeams.set(player.fantasyTeam, {
-                    id: player.fantasyTeam.toLowerCase().replace(/\s+/g, '-'),
-                    name: player.fantasyTeam,
-                    abbreviation: player.fantasyTeam.substring(0, 3).toUpperCase(),
-                    logoUrl: `/logos/${player.fantasyTeam.toLowerCase().replace(/\s+/g, '-')}.png`
-                  });
-                }
-              });
-              
-              const teams = Array.from(uniqueTeams.values());
-              store.setAvailableTeams(teams);
-              
-              // Set Boykies roster as default if available
-              const boykiesTeam = teams.find(t => t.name.toLowerCase().includes('boykies'));
-              if (boykiesTeam) {
-                await store.fetchRosterComparison(boykiesTeam.id);
-              }
-            } else {
-              // Fall back to legacy fetchAllRosters for backward compatibility
-              const rawData = await fetchAllRosters();
-              
-              // Extract teams from the API response using the correct function for the flat data format
-              const teams = extractTeamsFromFlatData(rawData);
-              store.setAvailableTeams(teams);
-              
-              // Set Boykies roster as default if available
-              const boykiesTeam = teams.find(t => t.id === 'boykies');
-              if (boykiesTeam) {
-                await store.fetchRosterComparison('boykies');
-              }
-            }
+            // Set up mock teams for now
+            const mockTeams = [
+              { id: 'boykies', name: 'Boykies', abbreviation: 'BOY', logoUrl: '/logos/boykies.png' },
+              { id: 'team1', name: 'Team 1', abbreviation: 'T1', logoUrl: '/logos/team1.png' },
+              { id: 'team2', name: 'Team 2', abbreviation: 'T2', logoUrl: '/logos/team2.png' },
+              { id: 'team3', name: 'Team 3', abbreviation: 'T3', logoUrl: '/logos/team3.png' },
+              { id: 'team4', name: 'Team 4', abbreviation: 'T4', logoUrl: '/logos/team4.png' },
+              { id: 'team5', name: 'Team 5', abbreviation: 'T5', logoUrl: '/logos/team5.png' }
+            ];
+            
+            store.setAvailableTeams(mockTeams);
+            
+            // Set Boykies roster as default
+            await store.fetchRosterComparison('boykies');
+            
+            // Load initial schedule data
+            await store.loadInitialSchedule();
           } catch (apiError) {
             console.warn('API not available, falling back to mock data:', apiError);
             
@@ -187,10 +187,10 @@ export const useSeasonStore = create<SeasonStore>()(
             store.setAvailableTeams(mockTeams);
             
             // Set Boykies roster as default
-            const boykiesTeam = mockTeams.find(t => t.id === 'boykies');
-            if (boykiesTeam) {
-              await store.fetchRosterComparison('boykies');
-            }
+            await store.fetchRosterComparison('boykies');
+            
+            // Load initial schedule data
+            await store.loadInitialSchedule();
           }
         } catch (error) {
           console.error('Failed to initialize Season Mode:', error);
@@ -207,32 +207,17 @@ export const useSeasonStore = create<SeasonStore>()(
           store.setTeamsError(null);
           
           try {
-            // Fetch all players using the new Season API
-            await store.fetchAllPlayers();
+            // Set up mock teams for now
+            const mockTeams = [
+              { id: 'boykies', name: 'Boykies', abbreviation: 'BOY', logoUrl: '/logos/boykies.png' },
+              { id: 'team1', name: 'Team 1', abbreviation: 'T1', logoUrl: '/logos/team1.png' },
+              { id: 'team2', name: 'Team 2', abbreviation: 'T2', logoUrl: '/logos/team2.png' },
+              { id: 'team3', name: 'Team 3', abbreviation: 'T3', logoUrl: '/logos/team3.png' },
+              { id: 'team4', name: 'Team 4', abbreviation: 'T4', logoUrl: '/logos/team4.png' },
+              { id: 'team5', name: 'Team 5', abbreviation: 'T5', logoUrl: '/logos/team5.png' }
+            ];
             
-            if (store.allPlayers.length > 0) {
-              // Extract teams from the fetched players data
-              const uniqueTeams = new Map<string, SeasonTeam>();
-              
-              store.allPlayers.forEach(player => {
-                if (player.fantasyTeam && !uniqueTeams.has(player.fantasyTeam)) {
-                  uniqueTeams.set(player.fantasyTeam, {
-                    id: player.fantasyTeam.toLowerCase().replace(/\s+/g, '-'),
-                    name: player.fantasyTeam,
-                    abbreviation: player.fantasyTeam.substring(0, 3).toUpperCase(),
-                    logoUrl: `/logos/${player.fantasyTeam.toLowerCase().replace(/\s+/g, '-')}.png`
-                  });
-                }
-              });
-              
-              const teams = Array.from(uniqueTeams.values());
-              store.setAvailableTeams(teams);
-            } else {
-              // Fall back to legacy approach if no players data
-              const rawData = await fetchAllRosters();
-              const teams = extractTeams(rawData);
-              store.setAvailableTeams(teams);
-            }
+            store.setAvailableTeams(mockTeams);
           } catch (apiError) {
             console.warn('API not available, falling back to mock data:', apiError);
             
@@ -262,75 +247,55 @@ export const useSeasonStore = create<SeasonStore>()(
           store.setRostersLoading(true);
           store.setRostersError(null);
 
-          // Check cache first
-          const cachedRoster = store.getRosterFromCache(opponentTeamId);
-          if (cachedRoster && store.isCacheValid(opponentTeamId)) {
-            if (opponentTeamId === 'boykies') {
-              store.setBoykiesRoster(cachedRoster);
-            } else {
-              store.setOpponentRoster(cachedRoster);
+          // Try to load schedule data but don't let it block roster display
+          if (!store.scheduleData) {
+            try {
+              await store.fetchScheduleData(store.selectedWeek);
+            } catch (scheduleError) {
+              console.warn(`🏈 [ROSTER FETCH] ⚠️ Failed to load schedule data, continuing without enrichment:`, scheduleError);
+              // Continue without schedule enrichment - rosters will still display
             }
-            return;
           }
 
           let teamRoster: SeasonRoster | null = null;
 
           try {
-            // Ensure we have player data
-            if (store.allPlayers.length === 0) {
-              await store.fetchAllPlayers();
-            }
-            
-            if (store.allPlayers.length > 0) {
-              // Build roster from allPlayers data
-              const teamPlayers = store.allPlayers.filter(player => {
-                const teamId = player.fantasyTeam?.toLowerCase().replace(/\s+/g, '-');
-                return teamId === opponentTeamId ||
-                       (opponentTeamId === 'boykies' && player.fantasyTeam?.toLowerCase().includes('boykies'));
-              });
+            // For boykies, use the new API
+            if (opponentTeamId === 'boykies') {
+              if (!store.userRoster) {
+                await store.fetchUserRoster();
+              }
               
-              // Transform to RosterPlayer format
-              const rosterPlayers = teamPlayers.map((player, index) => ({
-                id: player.id,
-                name: player.name,
-                position: player.position,
-                team: player.team,
-                projectedPoints: player.projectedPoints ?? null,
-                isStarter: player.isStarter ?? index < 9, // First 9 are starters by default
-                slotPosition: (player.slotPosition ?? 'BN1') as RosterPlayer['slotPosition']
-              }));
-              
-              teamRoster = {
-                teamId: opponentTeamId,
-                teamName: store.availableTeams.find(t => t.id === opponentTeamId)?.name || opponentTeamId,
-                players: rosterPlayers,
-                totalProjectedPoints: rosterPlayers.reduce((sum, p) => sum + (p.projectedPoints || 0), 0),
-                lastUpdated: Date.now()
-              };
-              
-              // Find and set the selected opponent team
-              if (opponentTeamId !== 'boykies') {
-                const opponentTeam = store.availableTeams.find(t => t.id === opponentTeamId);
-                if (opponentTeam) {
-                  store.setSelectedOpponentTeam(opponentTeam);
-                }
+              if (store.userRoster) {
+                // Transform RosterApiPlayer[] to SeasonRoster format
+                const rosterPlayers = store.userRoster.map((player, index) => ({
+                  id: player.id || `player-${index}`,
+                  name: player.name,
+                  position: player.position || player.pos || 'N/A',
+                  team: typeof player.team === 'string'
+                    ? { abbr: player.team, logoUrl: `/logos/${player.team.toLowerCase()}.png` }
+                    : {
+                        abbr: player.team.abbr,
+                        logoUrl: player.team.logoUrl || `/logos/${player.team.abbr.toLowerCase()}.png`
+                      },
+                  projectedPoints: player.projectedPoints ?? null,
+                  isStarter: player.starter ?? index < 9,
+                  slotPosition: 'BN1' as RosterPlayer['slotPosition'], // Will be handled by components
+                  matchup: undefined, // RosterMatchup type is different from Matchup, will be handled later
+                  opponent: player.matchup?.opponent?.abbr
+                }));
+                
+                teamRoster = {
+                  teamId: 'boykies',
+                  teamName: 'Boykies',
+                  players: rosterPlayers,
+                  totalProjectedPoints: rosterPlayers.reduce((sum, p) => sum + (p.projectedPoints || 0), 0),
+                  lastUpdated: Date.now()
+                };
               }
             } else {
-              // Fall back to legacy approach
-              const rawData = await fetchAllRosters();
-              teamRoster = extractTeamRoster(rawData, opponentTeamId);
-              
-              if (!teamRoster) {
-                throw new Error(`Team roster not found for ${opponentTeamId}`);
-              }
-              
-              if (opponentTeamId !== 'boykies') {
-                const teams = extractTeams(rawData);
-                const opponentTeam = teams.find(t => t.id === opponentTeamId);
-                if (opponentTeam) {
-                  store.setSelectedOpponentTeam(opponentTeam);
-                }
-              }
+              // For other teams, throw error to fall back to mock data
+              throw new Error(`No API endpoint available for team: ${opponentTeamId}`);
             }
           } catch (apiError) {
             console.warn('API not available, falling back to mock roster data:', apiError);
@@ -379,9 +344,6 @@ export const useSeasonStore = create<SeasonStore>()(
           }
 
           if (teamRoster) {
-            // Cache the roster
-            store.updateRosterCache(opponentTeamId, teamRoster);
-
             // Set the appropriate roster
             if (opponentTeamId === 'boykies') {
               store.setBoykiesRoster(teamRoster);
@@ -398,162 +360,283 @@ export const useSeasonStore = create<SeasonStore>()(
         }
       },
 
-      // New roster data management actions
-      setAllPlayersData: (data) => set({ allPlayersData: data }),
+      // New action to fetch user roster using the new API
+      fetchUserRoster: async () => {
+        const store = get();
+        const selectedWeek = store.selectedWeek;
+        
+        try {
+          // Call the new API endpoint
+          const roster = await fetchRosterWithMatchups('boykies', 1);
+          
+          // Ensure projected points exist
+          const processedRoster = ensureProjectedPoints(roster);
+          
+          // Store in state and localStorage
+          store.setUserRoster(processedRoster);
+          store.saveUserRosterToStorage(processedRoster);
+          
+          // Trigger analysis
+          const analysisPayload = {
+            response_mode: 'blocking',
+            user: 'user_123',
+            query: 'Analyze rosters for weekly projections.',
+            inputs: {
+              userRoster: processedRoster,
+              opponentRoster: [],
+              week: selectedWeek
+            }
+          };
+          console.log('Analysis payload:', analysisPayload);
 
-      setMyRoster: (roster) => set({ myRoster: roster }),
+          // const analysisResponse = await analyzeRoster('user_123', processedRoster, selectedWeek);
+          // console.log('Analysis response:', analysisResponse.kind === 'json' ? analysisResponse.data : analysisResponse.data);
+        } catch (error) {
+          console.warn('API not available, falling back to mock user roster data:', error);
+          
+          // Fall back to mock roster data
+          const mockRoster = [
+            // QB
+            { id: '1', name: 'Mock Boykies QB', position: 'QB', team: { abbr: 'MIA', logoUrl: '/logos/mia.png' }, projectedPoints: 20.5, starter: true, matchup: { week: 1, opponent: { abbr: 'BUF', logoUrl: getTeamByAbbr('BUF')?.logoUrl || '/logos/buf.png' } } },
+            // RB
+            { id: '2', name: 'Mock Boykies RB1', position: 'RB', team: { abbr: 'DAL', logoUrl: '/logos/dal.png' }, projectedPoints: 18.2, starter: true, matchup: { week: 1, opponent: { abbr: 'NYG', logoUrl: getTeamByAbbr('NYG')?.logoUrl || '/logos/nyg.png' } } },
+            { id: '3', name: 'Mock Boykies RB2', position: 'RB', team: { abbr: 'SF', logoUrl: '/logos/sf.png' }, projectedPoints: 15.8, starter: true, matchup: { week: 1, opponent: { abbr: 'LAR', logoUrl: getTeamByAbbr('LAR')?.logoUrl || '/logos/lar.png' } } },
+            // WR
+            { id: '4', name: 'Mock Boykies WR1', position: 'WR', team: { abbr: 'KC', logoUrl: '/logos/kc.png' }, projectedPoints: 16.5, starter: true, matchup: { week: 1, opponent: { abbr: 'LV', logoUrl: getTeamByAbbr('LV')?.logoUrl || '/logos/lv.png' } } },
+            { id: '5', name: 'Mock Boykies WR2', position: 'WR', team: { abbr: 'BUF', logoUrl: '/logos/buf.png' }, projectedPoints: 14.3, starter: true, matchup: { week: 1, opponent: { abbr: 'MIA', logoUrl: getTeamByAbbr('MIA')?.logoUrl || '/logos/mia.png' } } },
+            // TE
+            { id: '6', name: 'Mock Boykies TE', position: 'TE', team: { abbr: 'KC', logoUrl: '/logos/kc.png' }, projectedPoints: 12.7, starter: true, matchup: { week: 1, opponent: { abbr: 'LV', logoUrl: getTeamByAbbr('LV')?.logoUrl || '/logos/lv.png' } } },
+            // FLEX
+            { id: '7', name: 'Mock Boykies FLEX', position: 'WR', team: { abbr: 'LAR', logoUrl: '/logos/lar.png' }, projectedPoints: 11.9, starter: true, matchup: { week: 1, opponent: { abbr: 'SF', logoUrl: getTeamByAbbr('SF')?.logoUrl || '/logos/sf.png' } } },
+            // K
+            { id: '8', name: 'Mock Boykies K', position: 'K', team: { abbr: 'BAL', logoUrl: '/logos/bal.png' }, projectedPoints: 8.5, starter: true, matchup: { week: 1, opponent: { abbr: 'PIT', logoUrl: getTeamByAbbr('PIT')?.logoUrl || '/logos/pit.png' } } },
+            // DST
+            { id: '9', name: 'Mock Boykies DST', position: 'DST', team: { abbr: 'SF', logoUrl: '/logos/sf.png' }, projectedPoints: 9.2, starter: true, matchup: { week: 1, opponent: { abbr: 'LAR', logoUrl: getTeamByAbbr('LAR')?.logoUrl || '/logos/lar.png' } } },
+            // Bench
+            { id: '10', name: 'Bench Player 1', position: 'RB', team: { abbr: 'NYG', logoUrl: '/logos/nyg.png' }, projectedPoints: 8.1, starter: false, matchup: { week: 1, opponent: { abbr: 'DAL', logoUrl: getTeamByAbbr('DAL')?.logoUrl || '/logos/dal.png' } } },
+            { id: '11', name: 'Bench Player 2', position: 'WR', team: { abbr: 'PHI', logoUrl: '/logos/phi.png' }, projectedPoints: 7.3, starter: false, matchup: { week: 1, opponent: { abbr: 'WAS', logoUrl: getTeamByAbbr('WAS')?.logoUrl || '/logos/was.png' } } },
+            { id: '12', name: 'Bench Player 3', position: 'QB', team: { abbr: 'GB', logoUrl: '/logos/gb.png' }, projectedPoints: 15.2, starter: false, matchup: { week: 1, opponent: { abbr: 'CHI', logoUrl: getTeamByAbbr('CHI')?.logoUrl || '/logos/chi.png' } } },
+            { id: '13', name: 'Bench Player 4', position: 'TE', team: { abbr: 'DEN', logoUrl: '/logos/den.png' }, projectedPoints: 6.8, starter: false, matchup: { week: 1, opponent: { abbr: 'KC', logoUrl: getTeamByAbbr('KC')?.logoUrl || '/logos/kc.png' } } },
+            { id: '14', name: 'Bench Player 5', position: 'WR', team: { abbr: 'SEA', logoUrl: '/logos/sea.png' }, projectedPoints: 5.9, starter: false, matchup: { week: 1, opponent: { abbr: 'ARI', logoUrl: getTeamByAbbr('ARI')?.logoUrl || '/logos/ari.png' } } },
+            { id: '15', name: 'Bench Player 6', position: 'RB', team: { abbr: 'CHI', logoUrl: '/logos/chi.png' }, projectedPoints: 4.7, starter: false, matchup: { week: 1, opponent: { abbr: 'GB', logoUrl: getTeamByAbbr('GB')?.logoUrl || '/logos/gb.png' } } }
+          ];
+          
+          // Ensure projected points exist for mock roster too
+          const processedMockRoster = ensureProjectedPoints(mockRoster);
+          
+          // Store in state and localStorage
+          store.setUserRoster(processedMockRoster);
+          console.log('userRoster[0].matchup.opponent.logoUrl:', processedMockRoster[0].matchup.opponent.logoUrl);
+          store.saveUserRosterToStorage(processedMockRoster);
+          
+          // Trigger analysis for mock roster too
+          const analysisPayload = {
+            response_mode: 'blocking',
+            user: 'user_123',
+            query: 'Analyze rosters for weekly projections.',
+            inputs: {
+              userRoster: processedMockRoster,
+              opponentRoster: [],
+              week: selectedWeek
+            }
+          };
+          console.log('Analysis payload:', analysisPayload);
 
-      setOpponentRosterData: (roster) => set({ opponentRosterData: roster }),
-
-      extractMyRoster: (allPlayersData) => {
-        // Handle different possible API response structures
-        let playersArray = null;
-        
-        // Check for players array (expected structure)
-        if (allPlayersData?.players && Array.isArray(allPlayersData.players)) {
-          playersArray = allPlayersData.players;
+          try {
+            // const analysisResponse = await analyzeRoster('user_123', processedMockRoster, selectedWeek);
+            // console.log('Analysis response:', analysisResponse.kind === 'json' ? analysisResponse.data : analysisResponse.data);
+          } catch (analysisError) {
+            console.warn('Analysis failed:', analysisError);
+          }
         }
-        // Check if the whole object is an array
-        else if (Array.isArray(allPlayersData)) {
-          playersArray = allPlayersData;
-        }
-        // Check for data array (includes ok/data structure)
-        else if (allPlayersData?.data && Array.isArray(allPlayersData.data)) {
-          playersArray = allPlayersData.data;
-        }
-        
-        if (!playersArray) {
-          console.log('❌ extractMyRoster - No players array found in any expected location');
-          console.log('🔍 Available keys to explore:', allPlayersData ? Object.keys(allPlayersData) : 'none');
-          return [];
-        }
-        
-        // Check for all possible field names that might contain fantasy team info
-        const possibleTeamFields = ['fantasyTeam', 'fantasy_team', 'teamName', 'team_name', 'FantasyTeam'];
-        
-        const teamFieldInfo = possibleTeamFields.map(fieldName => {
-          const hasField = playersArray.some(p => p && typeof p === 'object' && fieldName in p);
-          const uniqueValues = hasField ? [...new Set(playersArray.map(p => p[fieldName]).filter(v => v))] : [];
-          return { fieldName, hasField, uniqueValues: uniqueValues.slice(0, 10) }; // Limit to first 10 values
-        });
-        
-        // Find the correct field that has fantasy team data
-        let teamField = 'fantasyTeam'; // default
-        const fieldWithData = teamFieldInfo.find(field => field.hasField && field.uniqueValues.length > 0);
-        if (fieldWithData) {
-          teamField = fieldWithData.fieldName;
-        }
-        
-        // Try different variations of "Boykies" to check case sensitivity
-        const boykiesVariations = ['Boykies', 'boykies', 'BOYKIES', 'Boykies ', ' Boykies', 'boykies ', ' boykies'];
-        const matchCounts = boykiesVariations.map(variation => ({
-          variation,
-          count: playersArray.filter(player => player && player[teamField] === variation).length
-        }));
-        
-        // Find the best matching variation
-        const bestMatch = matchCounts.find(match => match.count > 0);
-        const teamNameToMatch = bestMatch ? bestMatch.variation : 'Boykies';
-        
-        // Filter for Boykies players
-        const myRoster = playersArray.filter(player =>
-          player &&
-          typeof player === 'object' &&
-          player[teamField] === teamNameToMatch
-        );
-        
-        if (myRoster.length === 0) {
-          console.log('⚠️ extractMyRoster - No players found! Debugging info:');
-          console.log(' - Team field used:', teamField);
-          console.log(' - Team name searched:', teamNameToMatch);
-          console.log(' - Total players searched:', playersArray.length);
-          console.log(' - Sample player team values:', playersArray.slice(0, 5).map(p => p[teamField]));
-        }
-        
-        return myRoster;
       },
 
-      extractOpponentRoster: (allPlayersData, teamName) => {
-        if (!allPlayersData?.players) return [];
-        return allPlayersData.players.filter(player => player.fantasyTeam === teamName);
-      },
-
+      // Storage actions
       loadRosterDataFromStorage: () => {
         const store = get();
         try {
-          // Load allPlayersData
-          const allPlayersDataStr = localStorage.getItem('allPlayersData');
-
-          if (allPlayersDataStr) {
-            const allPlayersData = JSON.parse(allPlayersDataStr);
-            store.setAllPlayersData(allPlayersData);
-
-            // Extract and set myRoster
-            const myRoster = store.extractMyRoster(allPlayersData);
-            store.setMyRoster(myRoster);
-          } else {
-            console.log('💾 No allPlayersData found in localStorage');
+          // First try to load from the new format using localStorage utilities
+          const userRoster = getJSON<RosterApiPlayer[] | null>('userRoster', null);
+          
+          if (userRoster && store.validateRosterFormat(userRoster)) {
+            store.setUserRoster(userRoster);
+            console.log('💾 Loaded userRoster from localStorage (validated):', userRoster.length, 'players');
+            return;
           }
-
-          // Load opponentRoster
-          const opponentRosterStr = localStorage.getItem('opponentRoster');
-          if (opponentRosterStr) {
-            const opponentRoster = JSON.parse(opponentRosterStr);
-            store.setOpponentRosterData(opponentRoster);
-            console.log('🏠 Site load - opponentRoster:', opponentRoster);
+          
+          // Check for legacy format (direct localStorage key without namespace)
+          const legacyRosterStr = localStorage.getItem('userRoster');
+          if (legacyRosterStr) {
+            try {
+              const legacyRoster = JSON.parse(legacyRosterStr);
+              console.log('💾 Found legacy userRoster format, attempting migration...');
+              
+              if (store.validateRosterFormat(legacyRoster)) {
+                // Migrate to new format
+                store.setUserRoster(legacyRoster);
+                store.saveUserRosterToStorage(legacyRoster);
+                
+                // Clean up legacy key
+                localStorage.removeItem('userRoster');
+                console.log('💾 Successfully migrated userRoster to new format');
+                return;
+              } else {
+                console.warn('💾 Legacy userRoster format is invalid, clearing...');
+                localStorage.removeItem('userRoster');
+              }
+            } catch (parseError) {
+              console.warn('💾 Failed to parse legacy userRoster, clearing...', parseError);
+              localStorage.removeItem('userRoster');
+            }
           }
+          
+          // Check for other legacy keys and clean them up
+          store.cleanupLegacyRosterData();
+          
+          console.log('💾 No valid userRoster found in localStorage');
         } catch (error) {
           console.error('💾 Failed to load roster data from storage:', error);
         }
       },
 
-      saveAllPlayersDataToStorage: (data) => {
-        try {
-          localStorage.setItem('allPlayersData', JSON.stringify(data));
-        } catch (error) {
-          console.error('Failed to save all players data to storage:', error);
-        }
-      },
-
-      saveOpponentRosterToStorage: (roster) => {
-        try {
-          localStorage.setItem('opponentRoster', JSON.stringify(roster));
-        } catch (error) {
-          console.error('Failed to save opponent roster to storage:', error);
-        }
-      },
-
-      // New Season API action
-      fetchAllPlayers: async (force = false) => {
+      saveUserRosterToStorage: (roster) => {
         const store = get();
-        
-        // Check if we should skip fetching (not forced and recently fetched)
-        if (!force && store.lastFetchedAt) {
-          const timeSinceLastFetch = Date.now() - store.lastFetchedAt;
-          const TWO_MINUTES = 2 * 60 * 1000;
-          if (timeSinceLastFetch < TWO_MINUTES) {
-            console.log('Skipping fetchAllPlayers - data is fresh');
+        try {
+          if (!store.validateRosterFormat(roster)) {
+            console.error('💾 Invalid roster format, cannot save to localStorage');
             return;
+          }
+          
+          // Use the namespaced localStorage utility
+          setJSON('userRoster', roster);
+          console.log('💾 Saved userRoster to localStorage:', roster.length, 'players');
+        } catch (error) {
+          console.error('💾 Failed to save user roster to storage:', error);
+        }
+      },
+
+      // New validation method
+      validateRosterFormat: (roster: unknown): roster is RosterApiPlayer[] => {
+        if (!Array.isArray(roster)) {
+          console.warn('💾 Roster validation failed: not an array');
+          return false;
+        }
+        
+        if (roster.length === 0) {
+          console.warn('💾 Roster validation failed: empty array');
+          return false;
+        }
+        
+        // Check that each item has required properties of RosterApiPlayer
+        for (const player of roster) {
+          if (typeof player !== 'object' || player === null) {
+            console.warn('💾 Roster validation failed: player is not an object');
+            return false;
+          }
+          
+          const p = player as Record<string, unknown>;
+          if (typeof p.name !== 'string') {
+            console.warn('💾 Roster validation failed: player missing name');
+            return false;
+          }
+          
+          if (typeof p.team !== 'object' && typeof p.team !== 'string') {
+            console.warn('💾 Roster validation failed: player missing team');
+            return false;
           }
         }
         
-        set({ allPlayersLoading: true, allPlayersError: null });
+        return true;
+      },
+
+      // Clean up legacy localStorage data
+      cleanupLegacyRosterData: () => {
+        const legacyKeys = [
+          'seasonRoster',
+          'boykiesRoster',
+          'opponentRosterData',
+          'allPlayersData'
+        ];
+        
+        legacyKeys.forEach(key => {
+          if (localStorage.getItem(key)) {
+            console.log(`💾 Cleaning up legacy localStorage key: ${key}`);
+            localStorage.removeItem(key);
+          }
+        });
+      },
+      
+      // Schedule management actions
+      setScheduleLoading: (loading) => set({ scheduleLoading: loading }),
+      
+      setScheduleError: (error) => set({ scheduleError: error }),
+      
+      // Schedule actions
+      fetchScheduleData: async (weekNumber) => {
+        const store = get();
+        
+        console.log(`📅 [SCHEDULE FETCH] Starting fetch for week ${weekNumber}`);
+        
+        // Set loading state and clear errors
+        store.setScheduleLoading(true);
+        store.setScheduleError(null);
         
         try {
-          const players = await fetchAllPlayers();
+          // Check cache first
+          const cached = store.scheduleCache[weekNumber];
+          if (cached) {
+            const cacheAge = Date.now() - cached.timestamp;
+            const FIVE_MINUTES = 5 * 60 * 1000;
+            if (cacheAge < FIVE_MINUTES) {
+              console.log(`📅 [SCHEDULE FETCH] ✅ Using cached schedule data for week ${weekNumber}`, cached.data);
+              set({ scheduleData: cached.data, scheduleLoading: false });
+              return;
+            }
+          }
+          
+          // Fetch from API
+          console.log(`📅 [SCHEDULE FETCH] 🌐 Fetching fresh schedule data for week ${weekNumber}`);
+          const scheduleData = await fetchSchedule(weekNumber);
+          console.log(`📅 [SCHEDULE FETCH] ✅ Received schedule data for week ${weekNumber}:`, scheduleData);
+          
+          // Update cache
+          const cacheEntry = { data: scheduleData, timestamp: Date.now() };
+          
+          // Update state
           set({
-            allPlayers: players,
-            allPlayersError: null,
-            lastFetchedAt: Date.now()
+            scheduleData,
+            scheduleCache: {
+              ...store.scheduleCache,
+              [weekNumber]: cacheEntry
+            },
+            scheduleError: null
           });
+          
+          // Save to localStorage
+          setJSON(`schedule.week.${weekNumber}`, scheduleData);
+          
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Failed to fetch players';
-          console.error('Failed to fetch all players:', error);
-          set({ allPlayersError: errorMessage });
-          // Leave prior data intact on error
+          const errorMessage = error instanceof Error ? error.message : 'Failed to fetch schedule';
+          console.error(`📅 [SCHEDULE FETCH] ❌ Failed to fetch schedule for week ${weekNumber}:`, error);
+          
+          // Try to load from localStorage as fallback
+          const stored = getJSON<unknown>(`schedule.week.${weekNumber}`, null);
+          if (stored) {
+            console.log(`📅 [SCHEDULE FETCH] 💾 Using stored schedule data for week ${weekNumber}`, stored);
+            set({ scheduleData: stored });
+            store.setScheduleError(null);
+          } else {
+            console.log(`📅 [SCHEDULE FETCH] ❌ No fallback data available for week ${weekNumber}`);
+            store.setScheduleError(errorMessage);
+          }
         } finally {
-          set({ allPlayersLoading: false });
+          store.setScheduleLoading(false);
         }
+      },
+      
+      loadInitialSchedule: async () => {
+        const store = get();
+        await store.fetchScheduleData(store.selectedWeek);
       },
     }),
     {

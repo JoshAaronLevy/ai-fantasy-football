@@ -3,6 +3,7 @@ import { Toast } from 'primereact/toast'
 import { useSeasonStore } from '../../state'
 import { RosterComparison } from './RosterComparison'
 import { TeamSelector } from './TeamSelector'
+import { WeekSelector } from './WeekSelector'
 
 interface SeasonModeContainerProps {
   toast: React.RefObject<Toast | null>;
@@ -71,7 +72,10 @@ export const SeasonModeContainer: React.FC<SeasonModeContainerProps> = ({ toast 
           <h2 className="text-2xl font-semibold text-gray-800">
             Season Mode - Roster Comparison
           </h2>
-          <TeamSelector />
+          <div className="flex items-center gap-4">
+            <WeekSelector />
+            <TeamSelector />
+          </div>
         </div>
       </div>
       
