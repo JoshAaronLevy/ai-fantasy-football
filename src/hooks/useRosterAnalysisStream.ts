@@ -8,7 +8,7 @@ export type RosterAnalysisStreamCallbacks = {
   onDone?: () => void;
   onError?: (err: unknown) => void;
   onFirstRealEvent?: () => void;
-  onMessageEnd?: (fullContent: string) => void; // Made optional since we'll persist directly
+  onMessageEnd?: (response: { side: string; requestId: string; roster: RosterApiPlayer[] }) => void; // Updated to handle JSON response
 };
 
 export function useRosterAnalysisStream(): {
@@ -98,10 +98,13 @@ export function useRosterAnalysisStream(): {
         const inputs = payloadWithInputs.inputs;
         
         if (inputs && inputs.userRoster && Array.isArray(inputs.userRoster)) {
+          // Send starting roster (first 9 players) for analysis
+          const startingRoster = inputs.userRoster.length > 0 ? inputs.userRoster.slice(0, 9) : [];
+          
           // Create proper payload using the new API helper function
           rosterAnalysisPayload = createRosterAnalysisPayload(
             'user', // userId
-            inputs.userRoster, // userRoster (single roster format)
+            startingRoster, // userRoster (starting roster)
             inputs.week || 1, // week
             'streaming' // responseMode
           );
@@ -121,21 +124,24 @@ export function useRosterAnalysisStream(): {
       cb.onFirstRealEvent?.();
       cb.onStart?.();
 
+      // Console log: payload being sent to backend
+      console.log('🔥 [ROSTER ANALYZE] Payload being sent to backend:', rosterAnalysisPayload);
+
       // Use the new streaming API helper
-      const fullContent = await analyzeRosterStreaming(rosterAnalysisPayload, {
+      const response = await analyzeRosterStreaming(rosterAnalysisPayload, {
         signal: controller.signal
       });
+
+      // Console log: raw response after stream completes
+      console.log('🔥 [ROSTER ANALYZE] Raw response after stream completes:', response);
 
       // Check if this request is still active after streaming completes
       if (activeRequestIdRef.current !== requestId) {
         return;
       }
 
-      // Provide the full content through the chunk callback for compatibility
-      cb.onChunk?.(fullContent);
-      
-      // Call optional callback with accumulated content
-      cb.onMessageEnd?.(fullContent);
+      // Provide the response through the callback
+      cb.onMessageEnd?.(response);
       
       cb.onDone?.();
       cleanup();

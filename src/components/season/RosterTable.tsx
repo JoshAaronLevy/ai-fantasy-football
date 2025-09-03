@@ -69,8 +69,8 @@ export const RosterTable: React.FC<RosterTableProps> = ({ userRoster, teamName }
               />
             );
           }}
-          style={{ width: '60px', textAlign: 'center' }}
-          headerStyle={{ width: '60px', textAlign: 'center' }}
+          style={{ width: '65px', textAlign: 'center' }}
+          headerStyle={{ width: '65px', textAlign: 'center' }}
         />
 
         <Column
@@ -87,15 +87,15 @@ export const RosterTable: React.FC<RosterTableProps> = ({ userRoster, teamName }
               }}
             />
           )}
-          style={{ width: '70px', textAlign: 'center' }}
-          headerStyle={{ width: '70px', textAlign: 'center' }}
+          style={{ width: '65px', textAlign: 'center' }}
+          headerStyle={{ width: '65px', textAlign: 'center' }}
         />
 
         <Column
           header="Proj"
           body={(player) => (player.matchup?.projectedPoints ?? 0).toFixed(2)}
-          style={{ width: '80px', textAlign: 'right' }}
-          headerStyle={{ width: '80px', textAlign: 'right' }}
+          style={{ width: '70px', textAlign: 'right' }}
+          headerStyle={{ width: '70px', textAlign: 'right' }}
         />
       </DataTable>
     </div>

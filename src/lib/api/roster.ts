@@ -11,6 +11,7 @@ export interface RosterAnalysisPayload {
   query: string;
   side: string;
   requestId: string;
+  model: string;
   inputs: {
     roster: RosterApiPlayer[];
     week: number;
@@ -20,6 +21,44 @@ export interface RosterAnalysisPayload {
 
 export interface RosterAnalysisResponse {
   [key: string]: unknown;
+}
+
+function extractJsonPayloadFromText(text: string): unknown {
+  // Fast path
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Ignore parsing errors and continue to robust parsing
+  }
+
+  // Find a plausible JSON object start
+  const candidates = ['{"side"', '{\n  "side"', '{"roster"', '{\n  "roster"'];
+  let start = -1;
+  for (const pat of candidates) {
+    const idx = text.indexOf(pat);
+    if (idx !== -1) {
+      if (start === -1 || idx < start) start = idx;
+    }
+  }
+  if (start === -1) throw new Error("No JSON object found in stream.");
+
+  // Walk braces from `start` to find the matching closing brace
+  let depth = 0, inStr = false, prev = "", end = -1;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' && prev !== '\\') inStr = !inStr;
+    if (!inStr) {
+      if (c === '{') depth++;
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) { end = i + 1; break; }
+      }
+    }
+    prev = c;
+  }
+  if (end === -1) throw new Error("Incomplete JSON object in stream.");
+  const slice = text.slice(start, end);
+  return JSON.parse(slice);
 }
 
 /**
@@ -69,7 +108,6 @@ export async function analyzeRoster(payload: RosterAnalysisPayload, opts?: { sig
       headers['Accept'] = 'application/x-ndjson';
     }
 
-    console.log('Sending payload to /roster/analyze:', processedPayload);
     const response = await fetch(endpoint, {
       method: 'POST',
       headers,
@@ -112,6 +150,7 @@ export function createRosterAnalysisPayload(
     query: 'Analyze roster for weekly projections.',
     side: 'user',
     requestId: crypto.randomUUID(),
+    model: "openrouter-sonnet-4",
     inputs: {
       roster: ensureProjectedPoints(userRoster),
       week,
@@ -167,7 +206,7 @@ export function prepareRosterForAnalysis(roster: RosterApiPlayer[]): RosterApiPl
  * @returns Buffered stream response as string
  * @throws {RosterApiError} If the request fails
  */
-export async function analyzeRosterStreaming(payload: RosterAnalysisPayload, opts?: { signal?: AbortSignal }): Promise<string> {
+export async function analyzeRosterStreaming(payload: RosterAnalysisPayload, opts?: { signal?: AbortSignal }): Promise<{ side: string; requestId: string; roster: RosterApiPlayer[] }> {
   try {
     // Ensure streaming mode
     const streamingPayload = { ...payload, response_mode: 'streaming' as const };
@@ -226,10 +265,14 @@ export async function analyzeRosterStreaming(payload: RosterAnalysisPayload, opt
       reader.releaseLock();
     }
     
-    // Console.log exactly once when complete with the full response text
-    console.log('Roster analysis complete:', accumulatedContent);
-    
-    return accumulatedContent;
+    // NEW: robust parse (handles <think> preface)
+    const parsed = extractJsonPayloadFromText(accumulatedContent);
+    if (parsed && typeof parsed === 'object' && parsed !== null) {
+      const result = parsed as { side?: string; requestId?: string; roster?: RosterApiPlayer[] };
+      const { side = '', requestId = '', roster = [] } = result;
+      return { side, requestId, roster };
+    }
+    throw new Error('Invalid response format from stream.');
     
   } catch (error) {
     const err: RosterApiError = {

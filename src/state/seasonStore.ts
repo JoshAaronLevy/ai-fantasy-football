@@ -509,7 +509,6 @@ export const useSeasonStore = create<SeasonStore>()(
           
           // Use the namespaced localStorage utility
           setJSON('userRoster', roster);
-          console.log('💾 Saved userRoster to localStorage:', roster.length, 'players');
         } catch (error) {
           console.error('💾 Failed to save user roster to storage:', error);
         }

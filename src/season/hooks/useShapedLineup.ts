@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useMemo } from 'react';
 import { useSeasonStore } from '../../state';
 import { shapeLineup } from '../lib/shapeLineup';
@@ -5,7 +6,7 @@ import type { ShapedRow } from '../lib/shapeLineup';
 
 export function useShapedLineup(teamName: string | null): { rows: ShapedRow[] } {
   // Get the primary data source - allPlayers from Season API
-  const allPlayers = useSeasonStore(s => s.allPlayers);
+  const allPlayers = useSeasonStore((s: any) => s.allPlayers);
   
   // Get enriched roster data if available (includes schedule matchups)
   const boykiesRoster = useSeasonStore(s => s.boykiesRoster);
@@ -19,7 +20,7 @@ export function useShapedLineup(teamName: string | null): { rows: ShapedRow[] } 
     }
     
     if (allPlayers && allPlayers.length > 0) {
-      const filteredPlayers = allPlayers.filter(p => {
+      const filteredPlayers = allPlayers.filter((p: { fantasyTeam: string; }) => {
         const match = teamName === 'Boykies'
           ? p.fantasyTeam?.toLowerCase().includes('boykies')
           : p.fantasyTeam === teamName;
@@ -32,7 +33,7 @@ export function useShapedLineup(teamName: string | null): { rows: ShapedRow[] } 
         // Create a map for quick lookup
         const enrichmentMap = new Map(boykiesRoster.players.map(p => [p.id, p]));
         
-        return filteredPlayers.map(player => {
+        return filteredPlayers.map((player: { id: string; matchup: any; opponent: any; }) => {
           const enrichedData = enrichmentMap.get(player.id);
           return {
             ...player,
@@ -44,7 +45,7 @@ export function useShapedLineup(teamName: string | null): { rows: ShapedRow[] } 
         // Create a map for quick lookup
         const enrichmentMap = new Map(opponentRoster.players.map(p => [p.id, p]));
         
-        return filteredPlayers.map(player => {
+        return filteredPlayers.map((player: { id: string; matchup: any; opponent: any; }) => {
           const enrichedData = enrichmentMap.get(player.id);
           return {
             ...player,

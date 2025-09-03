@@ -39,16 +39,9 @@ export async function fetchRosterWithMatchups(teamName: string, weekNumber: numb
     // The API should return an array directly
     const players: RosterApiPlayer[] = Array.isArray(data) ? data : (data?.players ?? []);
 
-    if (players.length > 0) {
-      const fantasyTeams = [...new Set(players.map((p: RosterApiPlayer) => p.fantasyTeam?.name))];
-      console.log('🔥 [API] Fantasy teams found:', fantasyTeams);
-      console.log('🔥 [API] First player example:', players[0]);
-      console.log('userRoster[0].matchup.opponent.logoUrl:', players[0].matchup?.opponent?.logoUrl);
-    } else {
+    if (!players) {
       console.warn('🔥 [API] WARNING: No players returned from API!');
     }
-
-    console.log('🔥 [API] Roster with matchups fetched successfully, player count:', players.length);
 
     // Return the raw array from the API response without extra transforms
     return players;

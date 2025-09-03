@@ -3,7 +3,7 @@ import { Button } from 'primereact/button'
 import { useSeasonStore } from '../../state'
 import { RosterTable } from './RosterTable'
 import { useRosterAnalysisStream } from '../../hooks/useRosterAnalysisStream'
-import { getUserId } from '../../lib/storage/localStore'
+import { getUserId, setJSON } from '../../lib/storage/localStore'
 
 export const RosterComparison: React.FC = () => {
   const selectedOpponentTeam = useSeasonStore(s => s.selectedOpponentTeam)
@@ -16,6 +16,7 @@ export const RosterComparison: React.FC = () => {
   const getRosterFromCache = useSeasonStore(s => s.getRosterFromCache)
   const fetchRosterComparison = useSeasonStore(s => s.fetchRosterComparison)
   const fetchUserRoster = useSeasonStore(s => s.fetchUserRoster)
+  const setUserRoster = useSeasonStore(s => s.setUserRoster)
   
   // Streaming hook for roster analysis
   const { start: startRosterAnalysis, cancel: cancelRosterAnalysis, isStreaming } = useRosterAnalysisStream()
@@ -30,6 +31,7 @@ export const RosterComparison: React.FC = () => {
       return
     }
 
+    // Get expected length before the API call
     const userId = getUserId()
     
     // Create payload with streaming mode
@@ -44,13 +46,58 @@ export const RosterComparison: React.FC = () => {
       }
     }
 
-    console.log('Starting roster analysis stream for week:', selectedWeek)
-    
-    await startRosterAnalysis(payload, {
-      onStart: () => console.log("Roster analysis stream started"),
-      onError: (err) => console.error("Roster analyze stream error:", err),
-      onMessageEnd: (fullContent) => console.log("Roster analyze stream complete:", fullContent)
-    })
+    try {
+      await startRosterAnalysis(payload, {
+        onError: (err) => console.error("Roster analyze stream error:", err),
+        onMessageEnd: (resp) => {
+          // Guard: check if roster is valid
+          if (!Array.isArray(resp.roster)) {
+            console.warn("Analyze skipped: invalid roster from response")
+            return
+          }
+
+          // Get the current full roster
+          const currentRoster = useSeasonStore.getState().userRoster
+          if (!currentRoster || currentRoster.length === 0) {
+            console.warn("No current roster to update")
+            return
+          }
+
+          // Process all analyzed players from the response
+          let updatedRoster = [...currentRoster]
+          
+          for (const analyzedPlayer of resp.roster) {
+            if (!analyzedPlayer || !analyzedPlayer.name) {
+              console.warn("Skipping invalid analyzed player:", analyzedPlayer)
+              continue
+            }
+
+            // Find and update the matching player in the current roster
+            updatedRoster = updatedRoster.map(player => {
+              if (player.name === analyzedPlayer.name) {
+                // Update this player with the analyzed data
+                return { ...player, ...analyzedPlayer }
+              }
+              return player // Keep other players unchanged
+            })
+          }
+
+          // Update localStorage
+          setJSON("userRoster", updatedRoster)
+
+          // Update state
+          setUserRoster(updatedRoster)
+
+          // Single final log
+          setTimeout(() => {
+            const latest = useSeasonStore.getState().userRoster
+            console.log("User roster in state:", latest)
+          }, 0)
+        }
+      })
+    } catch (err) {
+      console.error("Roster analyze stream error:", err)
+    }
   }
   
   // Cleanup on unmount
