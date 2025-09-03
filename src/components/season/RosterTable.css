@@ -1,0 +1,17 @@
+/* Visual emphasis for position focus */
+.p-datatable .row-emphasized {
+  background: var(--surface-100, #f6f7fb);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  transform: translateZ(0); /* GPU hint */
+  transition: box-shadow 120ms ease, background 120ms ease, filter 120ms ease;
+}
+
+.p-datatable .row-muted {
+  opacity: 0.55;
+  filter: grayscale(0.1);
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+
+.p-selection-column {
+  text-align: center;
+}

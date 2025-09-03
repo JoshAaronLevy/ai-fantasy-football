@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Button } from 'primereact/button'
 import { useSeasonStore } from '../../state'
 import { RosterTable } from './RosterTable'
 import { useRosterAnalysisStream } from '../../hooks/useRosterAnalysisStream'
 import { getUserId, setJSON } from '../../lib/storage/localStore'
+import type { RosterApiPlayer } from '../../types'
 
 export const RosterComparison: React.FC = () => {
   const selectedOpponentTeam = useSeasonStore(s => s.selectedOpponentTeam)
@@ -21,6 +22,9 @@ export const RosterComparison: React.FC = () => {
   // Streaming hook for roster analysis
   const { start: startRosterAnalysis, cancel: cancelRosterAnalysis, isStreaming } = useRosterAnalysisStream()
   
+  // Track selected players for analysis
+  const [selectedPlayers, setSelectedPlayers] = useState<RosterApiPlayer[]>([])
+  
   // Get opponent roster from cache
   const opponentRoster = selectedOpponentTeam ? getRosterFromCache(selectedOpponentTeam.id) : null
 
@@ -31,6 +35,11 @@ export const RosterComparison: React.FC = () => {
       return
     }
 
+    // Determine which players to analyze: selected players or first 9 starters
+    const playersToAnalyze = selectedPlayers.length > 0
+      ? selectedPlayers
+      : userRoster.slice(0, 9)
+
     // Get expected length before the API call
     const userId = getUserId()
     
@@ -40,7 +49,7 @@ export const RosterComparison: React.FC = () => {
       user: String(userId),
       query: 'Analyze rosters for weekly projections.',
       inputs: {
-        userRoster: userRoster,
+        userRoster: playersToAnalyze,
         opponentRoster: [],
         week: selectedWeek
       }
@@ -75,8 +84,19 @@ export const RosterComparison: React.FC = () => {
             // Find and update the matching player in the current roster
             updatedRoster = updatedRoster.map(player => {
               if (player.name === analyzedPlayer.name) {
-                // Update this player with the analyzed data
-                return { ...player, ...analyzedPlayer }
+                // Preserve original team and matchup data (including logoUrls) while updating analysis data
+                return {
+                  ...player,
+                  ...analyzedPlayer,
+                  // Preserve original team data if it exists
+                  team: player.team,
+                  // Preserve original matchup data if it exists
+                  matchup: player.matchup ? {
+                    ...player.matchup,
+                    // Only update projected points from analysis, keep opponent data intact
+                    projectedPoints: analyzedPlayer.projectedPoints ?? analyzedPlayer.matchup?.projectedPoints ?? player.matchup.projectedPoints
+                  } : analyzedPlayer.matchup
+                }
               }
               return player // Keep other players unchanged
             })
@@ -87,6 +107,9 @@ export const RosterComparison: React.FC = () => {
 
           // Update state
           setUserRoster(updatedRoster)
+
+          // Console log localStorage roster after analysis completes
+          console.log('🔍 [ANALYSIS COMPLETE] localStorage roster after API stream finishes:', updatedRoster)
 
           // Single final log
           setTimeout(() => {
@@ -155,6 +178,14 @@ export const RosterComparison: React.FC = () => {
     )
   }
 
+  // Determine button label based on selected players
+  const getAnalyzeButtonLabel = () => {
+    if (selectedPlayers.length > 0) {
+      return `Analyze ${selectedPlayers.length} Selected Player${selectedPlayers.length === 1 ? '' : 's'}`
+    }
+    return 'Analyze Starters'
+  }
+
   return (
     <div className="roster-comparison">
       <div className="roster-comparison-grid">
@@ -162,7 +193,7 @@ export const RosterComparison: React.FC = () => {
         <div className="roster-table-wrapper">
           <div style={{ marginBottom: '1rem' }}>
             <Button
-              label="Analyze Roster"
+              label={getAnalyzeButtonLabel()}
               onClick={handleAnalyzeRoster}
               loading={isStreaming}
               disabled={!userRoster || userRoster.length === 0}
@@ -172,6 +203,8 @@ export const RosterComparison: React.FC = () => {
           <RosterTable
             userRoster={userRoster || []}
             teamName="Boykies"
+            enableUserSelectionAndFocus={true}
+            onSelectedPlayersChange={setSelectedPlayers}
           />
         </div>
 

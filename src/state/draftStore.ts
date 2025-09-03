@@ -1414,9 +1414,7 @@ export const useDraftStore = create<DraftState>()(
           try {
             // This draftStore method is deprecated - use seasonStore instead
             throw new Error('Use seasonStore.fetchRosterComparison instead');
-          } catch (apiError) {
-            console.warn('API not available, falling back to mock roster data:', apiError);
-            
+          } catch {
             // Fall back to mock roster data when API is not available
             teamRoster = {
               teamId: opponentTeamId,

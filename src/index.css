@@ -78,6 +78,7 @@ body {
 
 .min-h-screen {
   min-height: 100vh;
+  background-color: #EDF0F4;
 }
 
 .w-full {
@@ -845,4 +846,8 @@ body {
   .roster-data-table .p-datatable-tbody > tr > td {
     padding: 0.4rem !important;
   }
+}
+
+.p-column-title {
+  width: 100%;
 }

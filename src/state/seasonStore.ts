@@ -67,7 +67,12 @@ export const useSeasonStore = create<SeasonStore>()(
       selectedOpponentTeam: null,
       boykiesRoster: null,
       opponentRoster: null,
-      userRoster: null,
+      userRoster: (() => {
+        // Log initial userRoster state from localStorage on store creation
+        const savedRoster = getJSON<RosterApiPlayer[] | null>('userRoster', null);
+        console.log('🔍 [STORE INIT] Initial userRoster from localStorage:', savedRoster);
+        return savedRoster;
+      })(),
       rostersLoading: false,
       rostersError: null,
       teamsLoading: false,
@@ -146,13 +151,20 @@ export const useSeasonStore = create<SeasonStore>()(
       // Data fetching actions
       initializeSeasonMode: async () => {
         const store = get();
+        console.log('🔍 [INIT] initializeSeasonMode called');
         try {
           store.setTeamsLoading(true);
           store.setTeamsError(null);
           
           try {
-            // Fetch user roster first
-            await store.fetchUserRoster();
+            // Try to load roster from localStorage first
+            console.log('🔍 [INIT] About to call loadRosterDataFromStorage');
+            store.loadRosterDataFromStorage();
+            
+            // Only fetch from API if localStorage is empty/invalid
+            if (!store.userRoster) {
+              await store.fetchUserRoster();
+            }
             
             // Set up mock teams for now
             const mockTeams = [
@@ -297,9 +309,7 @@ export const useSeasonStore = create<SeasonStore>()(
               // For other teams, throw error to fall back to mock data
               throw new Error(`No API endpoint available for team: ${opponentTeamId}`);
             }
-          } catch (apiError) {
-            console.warn('API not available, falling back to mock roster data:', apiError);
-            
+          } catch {
             // Fall back to mock roster data when API is not available
             teamRoster = {
               teamId: opponentTeamId,
@@ -377,6 +387,7 @@ export const useSeasonStore = create<SeasonStore>()(
           store.saveUserRosterToStorage(processedRoster);
           
           // Trigger analysis
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const analysisPayload = {
             response_mode: 'blocking',
             user: 'user_123',
@@ -387,7 +398,8 @@ export const useSeasonStore = create<SeasonStore>()(
               week: selectedWeek
             }
           };
-          console.log('Analysis payload:', analysisPayload);
+
+          // console.log('Analysis payload:', analysisPayload);
 
           // const analysisResponse = await analyzeRoster('user_123', processedRoster, selectedWeek);
           // console.log('Analysis response:', analysisResponse.kind === 'json' ? analysisResponse.data : analysisResponse.data);
@@ -454,9 +466,13 @@ export const useSeasonStore = create<SeasonStore>()(
       // Storage actions
       loadRosterDataFromStorage: () => {
         const store = get();
+        console.log('🔍 [LOAD] loadRosterDataFromStorage called');
         try {
           // First try to load from the new format using localStorage utilities
           const userRoster = getJSON<RosterApiPlayer[] | null>('userRoster', null);
+          
+          // Always log what we found in localStorage on page load
+          console.log('🔍 [PAGE LOAD] localStorage roster after loading:', userRoster);
           
           if (userRoster && store.validateRosterFormat(userRoster)) {
             store.setUserRoster(userRoster);

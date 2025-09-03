@@ -98,13 +98,13 @@ export function useRosterAnalysisStream(): {
         const inputs = payloadWithInputs.inputs;
         
         if (inputs && inputs.userRoster && Array.isArray(inputs.userRoster)) {
-          // Send starting roster (first 9 players) for analysis
-          const startingRoster = inputs.userRoster.length > 0 ? inputs.userRoster.slice(0, 9) : [];
+          // Use the roster array passed in the payload (either selected players or first 9 starters)
+          const rosterToAnalyze = inputs.userRoster;
           
           // Create proper payload using the new API helper function
           rosterAnalysisPayload = createRosterAnalysisPayload(
             'user', // userId
-            startingRoster, // userRoster (starting roster)
+            rosterToAnalyze, // userRoster (selected players or starting roster)
             inputs.week || 1, // week
             'streaming' // responseMode
           );
