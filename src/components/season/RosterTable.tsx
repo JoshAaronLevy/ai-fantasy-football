@@ -3,14 +3,18 @@ import React, { useState, useEffect } from 'react'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { Button } from 'primereact/button'
-import type { RosterApiPlayer } from '../../types'
+import { InputNumber } from 'primereact/inputnumber'
+import type { ApiPlayer } from '../../types'
+import { useRosterAnalysisStream } from '../../hooks/useRosterAnalysisStream'
 import './RosterTable.css'
 
 interface RosterTableProps {
-  userRoster: RosterApiPlayer[];
+  userRoster: ApiPlayer[];
   teamName: string;
   enableUserSelectionAndFocus?: boolean; // true for user table, false for opponent table
-  onSelectedPlayersChange?: (selectedPlayers: RosterApiPlayer[]) => void;
+  onSelectedPlayersChange?: (selectedPlayers: ApiPlayer[]) => void;
+  onAnalyzeRoster?: (players: ApiPlayer[]) => void;
+  onResetAnalysis?: () => void;
 }
 
 /**
@@ -25,17 +29,25 @@ export const RosterTable: React.FC<RosterTableProps> = ({
   userRoster,
   teamName,
   enableUserSelectionAndFocus = false,
-  onSelectedPlayersChange
+  onSelectedPlayersChange,
+  onAnalyzeRoster,
+  onResetAnalysis
 }) => {
   const safeUserRoster = Array.isArray(userRoster) ? userRoster : [];
 
   // Controlled selection (PrimeReact docs pattern)
-  const [selectedPlayers, setSelectedPlayers] = useState<RosterApiPlayer[]>([]);
+  const [selectedPlayers, setSelectedPlayers] = useState<ApiPlayer[]>([]);
   const selectedCount = selectedPlayers.length;
+
+  // State for default projected points values
+  const [defaultValues, setDefaultValues] = useState<Record<string, number>>({});
 
   // Unique key for this table instance (user vs opponent)
   const tableKey = `${teamName}:${enableUserSelectionAndFocus ? 'user' : 'opponent'}`;
 
+  // Loading state from roster analysis hook
+  const { isStreaming } = useRosterAnalysisStream();
+  
   useEffect(() => {
     // Only log for the USER table (selection is disabled for opponent)
     if (!enableUserSelectionAndFocus) return;
@@ -55,7 +67,7 @@ export const RosterTable: React.FC<RosterTableProps> = ({
     // Subsequent logs only when length changes
     if (lastCount !== selectedCount) {
       __prevCountByKey.set(tableKey, selectedCount);
-      console.log('selectedPlayers:', selectedPlayers);
+      console.log('selectedPlayers:', JSON.stringify(selectedPlayers, null, 2));
       onSelectedPlayersChange?.(selectedPlayers);
     }
   }, [tableKey, enableUserSelectionAndFocus, selectedCount, selectedPlayers, onSelectedPlayersChange]);
@@ -63,21 +75,98 @@ export const RosterTable: React.FC<RosterTableProps> = ({
   // Position focus
   const [focusedPosition, setFocusedPosition] = useState<string | null>(null);
 
+  // Analysis and reset functions
+  const handleAnalyzeRoster = () => {
+    if (!onAnalyzeRoster) return;
+    
+    let playersToAnalyze: ApiPlayer[];
+    
+    if (selectedPlayers.length > 0) {
+      // If players are selected, analyze only selected players
+      playersToAnalyze = selectedPlayers.map(player => ({
+        ...player,
+        matchup: {
+          ...player.matchup,
+          projectedPoints: {
+            ...player.matchup.projectedPoints,
+            default: defaultValues[player.name] ?? 0
+          }
+        }
+      }));
+    } else {
+      // If no players selected, analyze all starting players
+      playersToAnalyze = safeUserRoster
+        .filter(player => player.starter)
+        .map(player => ({
+          ...player,
+          matchup: {
+            ...player.matchup,
+            projectedPoints: {
+              ...player.matchup.projectedPoints,
+              default: defaultValues[player.name] ?? 0
+            }
+          }
+        }));
+    }
+    
+    onAnalyzeRoster(playersToAnalyze);
+  };
+
+  const handleAnalyzeBench = () => {
+    if (!onAnalyzeRoster) return;
+    
+    // Analyze all bench players (non-starters)
+    const playersToAnalyze = safeUserRoster
+      .filter(player => !player.starter)
+      .map(player => ({
+        ...player,
+        matchup: {
+          ...player.matchup,
+          projectedPoints: {
+            ...player.matchup.projectedPoints,
+            default: defaultValues[player.name] ?? 0
+          }
+        }
+      }));
+    
+    onAnalyzeRoster(playersToAnalyze);
+  };
+
+  const handleResetAnalysis = () => {
+    if (onResetAnalysis) {
+      onResetAnalysis();
+    }
+    setSelectedPlayers([]);
+    setDefaultValues({});
+    setFocusedPosition(null);
+  };
+
+  // Default value change handler
+  const handleDefaultValueChange = (playerName: string, value: number | null) => {
+    setDefaultValues(prev => ({
+      ...prev,
+      [playerName]: value ?? 0
+    }));
+  };
+
   // Totals
   const totalProjectedPoints = safeUserRoster.reduce((total, player) => {
-    return total + (player.projectedPoints ?? player.matchup?.projectedPoints ?? 0);
+    const pp = player?.matchup?.projectedPoints;
+    const pts = pp && typeof pp === 'object'
+      ? (pp.llm ?? pp.default ?? 0)
+      : (pp ?? 0);
+    return total + pts;
   }, 0);
 
   // Pos button click
-  function onPositionClick(rowData: RosterApiPlayer) {
+  function onPositionClick(rowData: ApiPlayer) {
     console.log('selectedPlayer:', rowData);
-    const pos = ((rowData?.position || rowData?.pos || '') as string).toUpperCase();
+    const pos = (rowData?.position || '').toUpperCase();
     setFocusedPosition(prev => (prev === pos ? null : pos));
   }
 
-  function positionBodyTemplate(rowData: RosterApiPlayer) {
-    const label =
-      ((rowData?.position || rowData?.pos || '') as string).toUpperCase() || '—';
+  function positionBodyTemplate(rowData: ApiPlayer) {
+    const label = (rowData?.position || '').toUpperCase() || '—';
 
     const isFocused =
       !!focusedPosition && isRowMatchPosition(rowData, focusedPosition);
@@ -102,17 +191,53 @@ export const RosterTable: React.FC<RosterTableProps> = ({
     const p = pos.toUpperCase();
     return p === 'RB' || p === 'WR' || p === 'TE';
   }
-  function isRowMatchPosition(rowData: RosterApiPlayer, focused: string | null) {
+  function isRowMatchPosition(rowData: ApiPlayer, focused: string | null) {
     if (!focused) return false;
-    const rowPos = ((rowData?.position || rowData?.pos || '') as string).toUpperCase();
+    const rowPos = (rowData?.position || '').toUpperCase();
     if (focused === 'FLEX') return isFlexEligible(rowPos);
     return rowPos === focused;
   }
-  function getRowClassName(rowData: RosterApiPlayer) {
+  function getRowClassName(rowData: ApiPlayer) {
     if (!focusedPosition) return {};
     return isRowMatchPosition(rowData, focusedPosition)
       ? { 'row-emphasized': true }
       : { 'row-muted': true };
+  }
+
+  // Default column template
+  function defaultBodyTemplate(rowData: ApiPlayer) {
+    return (
+      <InputNumber
+        value={defaultValues[rowData.name] ?? 0}
+        onValueChange={(e) => handleDefaultValueChange(rowData.name, e.value ?? 0)}
+        mode="decimal"
+        minFractionDigits={0}
+        maxFractionDigits={2}
+        min={0}
+        inputStyle={{ width: '85px' }}
+      />
+    );
+  }
+
+  // Opponent column template with home/away indicator
+  function opponentBodyTemplate(player: ApiPlayer) {
+    const isAwayGame = player.matchup?.type === 'away';
+    
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+        {isAwayGame && <span style={{ fontSize: '14px', fontWeight: '500' }}>@</span>}
+        <img
+          src={player.matchup?.opponent?.logoUrl ?? ''}
+          alt={player.matchup?.opponent?.abbr ?? ''}
+          width={32}
+          height={32}
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            target.style.display = 'none';
+          }}
+        />
+      </div>
+    );
   }
 
   return (
@@ -126,6 +251,42 @@ export const RosterTable: React.FC<RosterTableProps> = ({
         </div>
       </div>
 
+      {/* Analysis buttons - only show for user table */}
+      {enableUserSelectionAndFocus && (onAnalyzeRoster || onResetAnalysis) && (
+        <div className="mb-4 mt-4 flex gap-2">
+          {onAnalyzeRoster && (
+            <Button
+              label="Analyze Starters"
+              icon="pi pi-chart-line"
+              onClick={handleAnalyzeRoster}
+              className="p-button-primary"
+              size="small"
+              disabled={isStreaming}
+            />
+          )}
+          {onAnalyzeRoster && (
+            <Button
+              label="Analyze Bench"
+              icon="pi pi-chart-bar"
+              onClick={handleAnalyzeBench}
+              className="p-button-primary"
+              size="small"
+              disabled={isStreaming}
+            />
+          )}
+          {onResetAnalysis && (
+            <Button
+              label="Reset Analysis"
+              icon="pi pi-refresh"
+              onClick={handleResetAnalysis}
+              className="p-button-secondary"
+              size="small"
+              disabled={isStreaming}
+            />
+          )}
+        </div>
+      )}
+
       {enableUserSelectionAndFocus ? (
         <DataTable
           value={safeUserRoster}
@@ -137,14 +298,7 @@ export const RosterTable: React.FC<RosterTableProps> = ({
           style={{ fontSize: '0.875rem' }}
           rowHover={false}              // row is NOT clickable for selection
           rowClassName={getRowClassName}
-          // selection via checkbox column (PrimeReact docs pattern)
-          selectionMode="multiple"
-          selection={selectedPlayers}
-          onSelectionChange={(e) => setSelectedPlayers((e.value as RosterApiPlayer[]) ?? [])}
         >
-          {/* Checkbox column */}
-          <Column selectionMode="multiple" headerStyle={{ width: '3rem' }} style={{ width: '3rem' }} />
-
           {/* Pos button */}
           <Column
             header="Pos"
@@ -187,29 +341,32 @@ export const RosterTable: React.FC<RosterTableProps> = ({
           {/* Opponent */}
           <Column
             header="Opponent"
-            body={(player) => (
-              <img
-                src={player.matchup?.opponent?.logoUrl ?? ''}
-                alt={player.matchup?.opponent?.abbr ?? ''}
-                width={32}
-                height={32}
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.style.display = 'none';
-                }}
-              />
-            )}
+            body={opponentBodyTemplate}
             style={{ width: '65px', textAlign: 'center' }}
             headerStyle={{ width: '65px', textAlign: 'center' }}
+          />
+
+          {/* Default column */}
+          <Column
+            header="Default"
+            body={defaultBodyTemplate}
+            style={{ width: '100px', textAlign: 'center' }}
+            headerStyle={{ width: '100px', textAlign: 'center' }}
           />
 
           {/* Projected points */}
           <Column
             header="Proj"
-            body={(player) => (player.projectedPoints ?? player.matchup?.projectedPoints ?? 0).toFixed(2)}
-            style={{ width: '70px', textAlign: 'right' }}
-            headerStyle={{ width: '70px', textAlign: 'right' }}
+            body={(player) => {
+              const pp = player?.matchup?.projectedPoints;
+              const pts = pp && typeof pp === 'object'
+                ? (pp.llm ?? pp.default ?? 0)
+                : (pp ?? 0);
+              return pts.toFixed(2);
+            }}
+            style={{ width: '6rem', textAlign: 'right' }}
           />
+
         </DataTable>
       ) : (
         <DataTable
@@ -223,7 +380,7 @@ export const RosterTable: React.FC<RosterTableProps> = ({
         >
           <Column
             header="Pos"
-            body={(player) => player.position ?? player.pos}
+            body={(player) => player.position}
             style={{ width: '60px', textAlign: 'center' }}
             headerStyle={{ width: '60px', textAlign: 'center' }}
           />
@@ -256,27 +413,22 @@ export const RosterTable: React.FC<RosterTableProps> = ({
           />
           <Column
             header="Opponent"
-            body={(player) => (
-              <img
-                src={player.matchup?.opponent?.logoUrl ?? ''}
-                alt={player.matchup?.opponent?.abbr ?? ''}
-                width={32}
-                height={32}
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.style.display = 'none';
-                }}
-              />
-            )}
+            body={opponentBodyTemplate}
             style={{ width: '65px', textAlign: 'center' }}
             headerStyle={{ width: '65px', textAlign: 'center' }}
           />
           <Column
             header="Proj"
-            body={(player) => (player.projectedPoints ?? player.matchup?.projectedPoints ?? 0).toFixed(2)}
-            style={{ width: '70px', textAlign: 'right' }}
-            headerStyle={{ width: '70px', textAlign: 'right' }}
+            body={(player) => {
+              const pp = player?.matchup?.projectedPoints;
+              const pts = pp && typeof pp === 'object'
+                ? (pp.llm ?? pp.default ?? 0)
+                : (pp ?? 0);
+              return pts.toFixed(2);
+            }}
+            style={{ width: '6rem', textAlign: 'right' }}
           />
+
         </DataTable>
       )}
     </div>

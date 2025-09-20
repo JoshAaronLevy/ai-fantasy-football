@@ -1,64 +1,42 @@
-import type { RosterApiPlayer } from '../../types';
+import type { AnalyzeResponse, ApiPlayer, RosterApiPlayer } from '../../types';
 
 export interface RosterApiError {
   code?: string | number;
   message: string;
 }
 
-export interface RosterAnalysisPayload {
-  response_mode: 'blocking' | 'streaming';
-  user: string;
-  query: string;
-  side: string;
-  requestId: string;
-  model: string;
-  inputs: {
-    roster: RosterApiPlayer[];
-    week: number;
-    weatherByGame: null | unknown;
-  };
-}
+const ANALYZE_URL = '/api/v1/roster/analyze';
 
-export interface RosterAnalysisResponse {
-  [key: string]: unknown;
-}
+/**
+ * Analyzes roster data using a simple blocking POST request
+ * @param players - Array of players to analyze  
+ * @returns Promise resolving to analysis response with players and meta
+ * @throws {Error} If the request fails or response is invalid
+ */
+export async function analyzeRosterBlocking(players: ApiPlayer[]): Promise<AnalyzeResponse> {
+  // Log payload before API call - first 2 players only
+  console.log('[ANALYZE STARTERS] Payload before API call (first 2 players):', JSON.stringify(players.slice(0, 2), null, 2));
+  
+  const res = await fetch(ANALYZE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // Send players array directly as API expects
+    body: JSON.stringify(players)
+  });
 
-function extractJsonPayloadFromText(text: string): unknown {
-  // Fast path
-  try {
-    return JSON.parse(text);
-  } catch {
-    // Ignore parsing errors and continue to robust parsing
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Analyze failed: ${res.status} ${res.statusText} ${text}`);
   }
 
-  // Find a plausible JSON object start
-  const candidates = ['{"side"', '{\n  "side"', '{"roster"', '{\n  "roster"'];
-  let start = -1;
-  for (const pat of candidates) {
-    const idx = text.indexOf(pat);
-    if (idx !== -1) {
-      if (start === -1 || idx < start) start = idx;
-    }
-  }
-  if (start === -1) throw new Error("No JSON object found in stream.");
+  // Backend returns one JSON object
+  const data = (await res.json()) as AnalyzeResponse;
 
-  // Walk braces from `start` to find the matching closing brace
-  let depth = 0, inStr = false, prev = "", end = -1;
-  for (let i = start; i < text.length; i++) {
-    const c = text[i];
-    if (c === '"' && prev !== '\\') inStr = !inStr;
-    if (!inStr) {
-      if (c === '{') depth++;
-      else if (c === '}') {
-        depth--;
-        if (depth === 0) { end = i + 1; break; }
-      }
-    }
-    prev = c;
+  // light validation
+  if (!data || !Array.isArray(data.players) || !data.meta) {
+    throw new Error('Analyze: unexpected response shape');
   }
-  if (end === -1) throw new Error("Incomplete JSON object in stream.");
-  const slice = text.slice(start, end);
-  return JSON.parse(slice);
+  return data;
 }
 
 /**
@@ -77,86 +55,6 @@ export function ensureProjectedPoints(roster: RosterApiPlayer[]): RosterApiPlaye
     }
     return p;
   });
-}
-
-/**
- * Analyzes roster data using streaming or blocking response mode
- * @param payload - The roster analysis payload with guaranteed projectedPoints
- * @param opts - Optional configuration including abort signal
- * @returns Raw response from roster analysis API
- * @throws {RosterApiError} If the request fails
- */
-export async function analyzeRoster(payload: RosterAnalysisPayload, opts?: { signal?: AbortSignal }): Promise<Response> {
-  try {
-    // Apply client-side projectedPoints defaulting before making the request
-    const processedPayload = {
-      ...payload,
-      inputs: {
-        ...payload.inputs,
-        roster: ensureProjectedPoints(payload.inputs.roster)
-      }
-    };
-
-    const endpoint = '/api/roster/analyze';
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    };
-
-    // Add streaming-specific headers if in streaming mode
-    if (payload.response_mode === 'streaming') {
-      headers['Accept'] = 'application/x-ndjson';
-    }
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(processedPayload),
-      signal: opts?.signal
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-
-    return response;
-  } catch (error) {
-    const err: RosterApiError = {
-      message: error instanceof Error ? error.message : 'Failed to analyze roster'
-    };
-    throw err;
-  }
-}
-
-/**
- * Creates a roster analysis payload with proper structure and defaults
- * @param userId - User identifier for the analysis request
- * @param userRoster - The user's roster to analyze
- * @param opponentRoster - The opponent's roster (optional, defaults to empty array)
- * @param week - The week number for analysis context
- * @param responseMode - Whether to use streaming or blocking response mode
- * @returns Properly structured payload for roster analysis
- */
-export function createRosterAnalysisPayload(
-  userId: string,
-  userRoster: RosterApiPlayer[],
-  week: number,
-  responseMode: 'blocking' | 'streaming' = 'blocking'
-): RosterAnalysisPayload {
-  return {
-    response_mode: responseMode,
-    user: String(userId),
-    query: 'Analyze roster for weekly projections.',
-    side: 'user',
-    requestId: crypto.randomUUID(),
-    model: "openrouter-sonnet-4",
-    inputs: {
-      roster: ensureProjectedPoints(userRoster),
-      week,
-      weatherByGame: null
-    }
-  };
 }
 
 /**
@@ -200,80 +98,75 @@ export function prepareRosterForAnalysis(roster: RosterApiPlayer[]): RosterApiPl
 }
 
 /**
- * Analyzes roster data using streaming with buffered response
- * @param payload - The roster analysis payload with guaranteed projectedPoints
- * @param opts - Optional configuration including abort signal
- * @returns Buffered stream response as string
- * @throws {RosterApiError} If the request fails
+ * Backward compatibility wrapper for existing code that might call analyzeRosterStreaming
+ * @param payload - Legacy payload (will extract players from it)
+ * @param opts - Options with optional onComplete callback
+ * @returns Promise resolving to legacy format for compatibility
+ * @deprecated Use analyzeRosterBlocking instead
  */
-export async function analyzeRosterStreaming(payload: RosterAnalysisPayload, opts?: { signal?: AbortSignal }): Promise<{ side: string; requestId: string; roster: RosterApiPlayer[] }> {
+export async function analyzeRosterStreaming(
+  payload: { inputs: { roster: RosterApiPlayer[] } }, 
+  opts?: { onComplete?: (result: { side: string; requestId: string; roster: RosterApiPlayer[] }) => void }
+): Promise<{ side: string; requestId: string; roster: RosterApiPlayer[] }> {
   try {
-    // Ensure streaming mode
-    const streamingPayload = { ...payload, response_mode: 'streaming' as const };
-    
-    const response = await analyzeRoster(streamingPayload, opts);
-    
-    if (!response.body) {
-      throw new Error('No response body available for streaming');
-    }
-
-    // Buffer the entire stream response
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let accumulatedContent = '';
-    
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) break;
-        
-        if (value) {
-          const decodedText = decoder.decode(value, { stream: true });
-          
-          // Parse each line of the stream
-          const lines = decodedText.split('\n');
-          for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine) continue;
-            
-            try {
-              const parsed = JSON.parse(trimmedLine);
-              
-              // Extract content from message and message_delta events
-              if (parsed && typeof parsed === 'object' && 'event' in parsed) {
-                const eventType = parsed.event;
-                
-                if ((eventType === 'message' || eventType === 'message_delta') && parsed.data) {
-                  const piece = parsed.data.answer ?? parsed.data.delta ?? parsed.data.text ?? '';
-                  if (piece) {
-                    accumulatedContent += piece;
-                  }
-                }
-              } else {
-                // Not a structured event, treat as raw content
-                accumulatedContent += trimmedLine;
-              }
-            } catch {
-              // Not valid JSON, treat as raw content
-              accumulatedContent += trimmedLine;
-            }
-          }
+    // Convert legacy RosterApiPlayer[] to ApiPlayer[] format
+    const apiPlayers: ApiPlayer[] = payload.inputs.roster.map(player => ({
+      id: player.id,
+      name: player.name,
+      position: player.position || player.pos || 'N/A',
+      fantasyTeam: typeof player.fantasyTeam === 'string' 
+        ? { name: player.fantasyTeam }
+        : player.fantasyTeam,
+      team: typeof player.team === 'string'
+        ? { abbr: player.team, logoUrl: `/logos/${player.team.toLowerCase()}.png` }
+        : { abbr: player.team.abbr, logoUrl: player.team.logoUrl },
+      starter: player.starter,
+      matchup: {
+        week: player.matchup?.week || 1,
+        type: player.matchup?.type,
+        opponent: player.matchup?.opponent,
+        kickoff: player.matchup?.kickoff,
+        projectedScore: player.matchup?.projectedScore,
+        finalScore: player.matchup?.finalScore,
+        projectedPoints: {
+          default: typeof player.matchup?.projectedPoints === 'number'
+            ? player.matchup.projectedPoints
+            : (player.matchup?.projectedPoints as { default?: number; llm?: number })?.default || null,
+          llm: (player.matchup?.projectedPoints as { default?: number; llm?: number })?.llm || null
         }
       }
-    } finally {
-      reader.releaseLock();
-    }
+    }));
+
+    const result = await analyzeRosterBlocking(apiPlayers);
     
-    // NEW: robust parse (handles <think> preface)
-    const parsed = extractJsonPayloadFromText(accumulatedContent);
-    if (parsed && typeof parsed === 'object' && parsed !== null) {
-      const result = parsed as { side?: string; requestId?: string; roster?: RosterApiPlayer[] };
-      const { side = '', requestId = '', roster = [] } = result;
-      return { side, requestId, roster };
+    // Convert back to legacy format
+    const legacyResult = {
+      side: 'user',
+      requestId: crypto.randomUUID(),
+      roster: result.players.map((player: ApiPlayer) => ({
+        id: player.id,
+        name: player.name,
+        position: player.position,
+        team: player.team || { abbr: 'N/A' },
+        fantasyTeam: player.fantasyTeam,
+        starter: player.starter,
+        matchup: {
+          week: player.matchup.week,
+          type: player.matchup.type,
+          opponent: player.matchup.opponent,
+          kickoff: player.matchup.kickoff,
+          projectedScore: player.matchup.projectedScore,
+          finalScore: player.matchup.finalScore,
+          projectedPoints: player.matchup.projectedPoints.llm || player.matchup.projectedPoints.default || 0
+        }
+      })) as RosterApiPlayer[]
+    };
+
+    if (opts?.onComplete) {
+      opts.onComplete(legacyResult);
     }
-    throw new Error('Invalid response format from stream.');
-    
+
+    return legacyResult;
   } catch (error) {
     const err: RosterApiError = {
       message: error instanceof Error ? error.message : 'Failed to analyze roster with streaming'

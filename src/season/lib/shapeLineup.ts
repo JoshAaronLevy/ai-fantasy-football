@@ -1,4 +1,4 @@
-import type { ApiRosterPlayer, Matchup } from '../../types';
+import type { ApiPlayer, MatchupInfo } from '../../types';
 
 export const LINEUP_POSITIONS = ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DST', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN'] as const;
 
@@ -11,16 +11,21 @@ export interface ShapedRow {
   projPoints?: number | null;
   isStarter: boolean; // false for BN rows
   opponent?: string; // Opponent abbreviation for display (e.g., "vs NYG", "@LAR")
-  matchup?: Matchup; // Full matchup object containing schedule details
+  matchup?: MatchupInfo; // Full matchup object containing schedule details
 }
 
-export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {  
+// Helper function for consistent projected points calculation
+function projected(p: ApiPlayer): number {
+  return p.matchup?.projectedPoints?.llm ?? p.matchup?.projectedPoints?.default ?? 0;
+}
+
+export function shapeLineup(players: ApiPlayer[]): ShapedRow[] {
   // Create a copy to avoid mutating the original array
   const availablePlayers = [...players];
   const shapedRows: ShapedRow[] = [];
   
   // Helper to create a shaped row from a player
-  const createRow = (player: ApiRosterPlayer | null, slotPosition: typeof LINEUP_POSITIONS[number]): ShapedRow => {
+  const createRow = (player: ApiPlayer | null, slotPosition: typeof LINEUP_POSITIONS[number]): ShapedRow => {
     if (!player) {
       // Create empty row
       return {
@@ -33,10 +38,10 @@ export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {
     
     // Determine opponent display if matchup is available
     let opponent: string | undefined;
-    if (player.matchup && player.team?.abbr) {
-      const isHome = player.matchup.homeTeam === player.team.abbr;
-      const opponentTeam = isHome ? player.matchup.awayTeam : player.matchup.homeTeam;
-      opponent = isHome ? opponentTeam : `@${player.matchup.homeTeam}`;
+    if (player.matchup) {
+      const homeAway = player.matchup.type === 'away' ? '@' : '';
+      const oppAbbr = player.matchup.opponent?.abbr ?? '';
+      opponent = oppAbbr ? `${homeAway}${oppAbbr}` : '';
     }
     
     const row = {
@@ -45,17 +50,17 @@ export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {
       position: player.position,
       teamAbbr: player.team?.abbr,
       teamLogoUrl: player.team?.logoUrl,
-      projPoints: player.projectedPoints ?? null,
+      projPoints: projected(player),
       isStarter: slotPosition !== 'BN',
       matchup: player.matchup, // Pass through the matchup data if available
-      opponent: opponent || (player.opponent as string | undefined), // Use computed opponent, fallback to original
+      opponent: opponent || undefined,
     };
 
     return row;
   };
   
   // Helper to find and remove a player from available list
-  const takePlayer = (condition: (p: ApiRosterPlayer) => boolean): ApiRosterPlayer | null => {
+  const takePlayer = (condition: (p: ApiPlayer) => boolean): ApiPlayer | null => {
     const index = availablePlayers.findIndex(condition);
     if (index >= 0) {
       return availablePlayers.splice(index, 1)[0];
@@ -80,7 +85,7 @@ export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {
   
   primaryPositions.forEach(({ slot, position }) => {
     // First try to find a starter for this position
-    let player = takePlayer(p => p.position === position && p.isStarter === true);
+    let player = takePlayer(p => p.position === position && p.starter === true);
     
     // If no starter, take first available for that position
     if (!player) {
@@ -97,15 +102,22 @@ export function shapeLineup(players: ApiRosterPlayer[]): ShapedRow[] {
   // Fill FLEX position
   // FLEX = highest-priority RB/WR/TE not already placed
   // Prefer one with starter === true if present, else first eligible
-  let flexPlayer = takePlayer(p => 
-    (p.position === 'RB' || p.position === 'WR' || p.position === 'TE') && 
-    p.isStarter === true
+  let flexPlayer = takePlayer(p =>
+    (p.position === 'RB' || p.position === 'WR' || p.position === 'TE') &&
+    p.starter === true
   );
   
   if (!flexPlayer) {
-    flexPlayer = takePlayer(p => 
+    // If no starter found, find the best remaining RB/WR/TE by projected points
+    const flexCandidates = availablePlayers.filter(p =>
       p.position === 'RB' || p.position === 'WR' || p.position === 'TE'
     );
+    
+    if (flexCandidates.length > 0) {
+      // Sort by projected points descending and take the best
+      flexCandidates.sort((a, b) => projected(b) - projected(a));
+      flexPlayer = takePlayer(p => p === flexCandidates[0]);
+    }
   }
   
   shapedRows.push(createRow(flexPlayer, 'FLEX'));

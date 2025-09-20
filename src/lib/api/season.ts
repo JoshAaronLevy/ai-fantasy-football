@@ -1,6 +1,9 @@
-import type { RosterApiPlayer, RosterMatchup } from '../../types';
+import type { ApiPlayer } from '../../types';
 import { getUserId } from '../storage/localStore';
+import { normalizePlayers } from '../../season/lib/normalizePlayer';
 
+// At top-level of this module (near imports)
+const activeRosterRequests = new Map<string, Promise<ApiPlayer[]>>();
 
 export interface SeasonApiError {
   code?: string | number;
@@ -19,45 +22,31 @@ export interface RosterAnalysisResponse {
 }
 
 
-export async function fetchRosterWithMatchups(teamName: string, weekNumber: number, opts?: { signal?: AbortSignal }): Promise<RosterApiPlayer[]> {
+export function buildRosterUrl(team: string, week: number | string): string {
+  return `/api/v1/roster/${encodeURIComponent(team)}/${encodeURIComponent(String(week))}`;
+}
+
+export async function fetchRosterWithMatchups(teamName: string, weekNumber: number | string): Promise<ApiPlayer[]> {
+  const key = `${teamName}:${String(weekNumber)}`;
+
+  if (activeRosterRequests.has(key)) {
+    if (import.meta?.env?.DEV) console.debug('[API] single-flight reuse', key);
+    return activeRosterRequests.get(key)!;
+  }
+
+  const p = (async () => {
+    const res = await fetch(buildRosterUrl(teamName, weekNumber));
+    if (!res.ok) throw new Error(`Roster fetch failed: ${res.status}`);
+    const raw = await res.json();
+    const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.roster) ? raw.roster : []);
+    return normalizePlayers(arr);
+  })();
+
+  activeRosterRequests.set(key, p);
   try {
-    // For now, hardcode the values as requested
-    const endpoint = `/api/roster/boykies/matchups/1`;
-    
-    const res = await fetch(endpoint, {
-      signal: opts?.signal,
-      headers: { 'Accept': 'application/json' }
-    });
-
-    if (!res.ok) {
-      console.error('🔥 [API] Request failed with status:', res.status);
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    }
-
-    const data = await res.json();
-
-    // The API should return an array directly
-    const players: RosterApiPlayer[] = Array.isArray(data) ? data : (data?.players ?? []);
-
-    if (!players) {
-      console.warn('🔥 [API] WARNING: No players returned from API!');
-    }
-
-    // Return the raw array from the API response without extra transforms
-    return players;
-  } catch (e) {
-    console.error('🔥 [API] fetchRosterWithMatchups error details:', {
-      error: e,
-      message: e instanceof Error ? e.message : 'Unknown error',
-      stack: e instanceof Error ? e.stack : undefined,
-      name: e instanceof Error ? e.name : undefined
-    });
-    
-    // Re-throw the error so the caller can handle it
-    const err: SeasonApiError = {
-      message: e instanceof Error ? e.message : 'Failed to fetch roster with matchups'
-    };
-    throw err;
+    return await p;
+  } finally {
+    activeRosterRequests.delete(key);
   }
 }
 
@@ -109,7 +98,7 @@ export async function fetchSchedule(weekNumber: number, opts?: { signal?: AbortS
  * @param week - The week number for analysis context
  * @returns Raw response from Dify API with content-type detection
  */
-export async function analyzeRoster(userId: string, roster: RosterApiPlayer[], week: number) {
+export async function analyzeRoster(userId: string, roster: ApiPlayer[], week: number) {
   const body = {
     response_mode: 'blocking',
     user: String(userId),
@@ -136,20 +125,9 @@ export async function analyzeRoster(userId: string, roster: RosterApiPlayer[], w
 }
 
 /**
- * Ensures each player in a roster has matchup.projectedPoints set to a valid number.
- * If projectedPoints is missing or not numeric, it defaults to 0.00.
- * This is required for the Dify integration where projectedPoints must be guaranteed to exist.
- *
- * @param roster - Array of roster objects that may have matchup data
- * @returns New array with matchup.projectedPoints guaranteed to exist as a number
+ * Legacy function - now a no-op since normalizePlayers handles projected points.
+ * Kept for compatibility but does nothing since ApiPlayer already has proper structure.
  */
-export function ensureProjectedPoints<T extends { matchup?: RosterMatchup }>(roster: T[]): T[] {
-  return roster.map(p => {
-    const m = p.matchup ?? {};
-    const raw = (m as RosterMatchup).projectedPoints;
-    const value = Number.isFinite(raw) ? Number(raw) : 0;
-    // keep two decimals but store as number
-    const fixed = Number(value.toFixed(2));
-    return { ...p, matchup: { ...m, projectedPoints: fixed } as RosterMatchup };
-  });
+export function ensureProjectedPoints<T>(roster: T[]): T[] {
+  return roster;
 }

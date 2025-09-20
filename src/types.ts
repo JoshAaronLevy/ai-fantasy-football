@@ -8,13 +8,13 @@ export interface TeamRef {
 
 export interface RosterMatchup {
   week: number;
-  type?: 'home' | 'away';
+  type?: string;
   opponent?: TeamRef;
   kickoff?: string;
   projectedScore?: string;
   finalScore?: string;
   bye?: boolean;
-  projectedPoints?: number;
+  projectedPoints?: number | ProjectedPoints;
 }
 
 export interface RosterApiPlayer {
@@ -219,5 +219,64 @@ export interface SeasonState {
   // Cache management
   lastCacheUpdate: number;
   rosterCache: Record<string, RosterApiPlayer[]>;
+}
+
+// --- New minimal shapes from backend ---
+export interface ProjectedPoints {
+  default: number | null;
+  llm: number | null;
+}
+
+export interface WeatherInfo {
+  kickoffLocal?: string;
+  context?: string;
+  tempLowF?: number;
+  tempHighF?: number;
+  windMeanMph?: number;
+  precipAvgIn?: number;
+}
+
+export interface TeamMini {
+  abbr: string;
+  logoUrl?: string;
+}
+
+export interface MatchupInfo {
+  week: number;
+  type?: 'home' | 'away' | string;
+  opponent?: TeamMini;
+  kickoff?: string;
+  projectedScore?: string;
+  finalScore?: string;
+  projectedPoints: ProjectedPoints;
+  weather?: WeatherInfo;
+}
+
+export interface ApiPlayer {
+  id?: string;
+  name: string;
+  position: string;        // 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DST' | 'DEF' | 'D/ST'
+  fantasyTeam?: { owner?: string; name?: string; endpoint?: string };
+  team: TeamMini;
+  starter?: boolean;
+  matchup: MatchupInfo;
+  analysis?: string;       // includes delta & scoring status lines
+  expectedLine?: Record<string, number>; // optional; for debug/diagnostics
+  explanation?: string;    // optional; short rationale from model
+  confidence?: number;     // optional; 0..1
+  // allow backend to attach _diag when DEBUG_PROJECTIONS=1
+  _diag?: Record<string, unknown>;
+}
+
+export interface AnalyzeMeta {
+  scoringPolicy: 'custom-overrides' | 'espn-defaults';
+  scoring: Record<string, unknown>;
+  scoringChecksum: string;
+  diagnostics?: Array<Record<string, unknown>>;
+}
+
+export interface AnalyzeResponse {
+  players: ApiPlayer[];
+  meta: AnalyzeMeta;
 }
 

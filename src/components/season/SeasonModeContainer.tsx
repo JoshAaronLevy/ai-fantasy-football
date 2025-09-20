@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { Toast } from 'primereact/toast'
 import { useSeasonStore } from '../../state'
 import { RosterComparison } from './RosterComparison'
@@ -13,10 +13,14 @@ export const SeasonModeContainer: React.FC<SeasonModeContainerProps> = ({ toast 
   const teamsLoading = useSeasonStore(s => s.teamsLoading)
   const teamsError = useSeasonStore(s => s.teamsError)
   const availableTeams = useSeasonStore(s => s.availableTeams)
-  const initializeSeasonMode = useSeasonStore(s => s.initializeSeasonMode)
+  const initializeSeasonMode = useSeasonStore(s => s.initializeSeasonMode) // stable selector
+  const didInitRef = useRef(false)
 
   // Initialize Season Mode on mount
   useEffect(() => {
+    if (didInitRef.current) return
+    didInitRef.current = true
+
     if (availableTeams.length === 0 && !teamsLoading && !teamsError) {
       initializeSeasonMode().catch((error) => {
         console.error('Failed to initialize Season Mode:', error)
@@ -28,7 +32,7 @@ export const SeasonModeContainer: React.FC<SeasonModeContainerProps> = ({ toast 
         })
       })
     }
-  }, [availableTeams.length, teamsLoading, teamsError, initializeSeasonMode, toast])
+  }, [availableTeams.length, teamsLoading, teamsError, initializeSeasonMode])
 
   // Show error toast when teams fail to load
   useEffect(() => {
